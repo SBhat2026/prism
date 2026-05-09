@@ -1,0 +1,9 @@
+torch>=2.0
+fair-esm
+freesasa
+numpy
+pandas
+scipy
+requests
+gradio>=4.0
+huggingface_hub

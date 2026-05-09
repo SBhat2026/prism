@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Data — large files not tracked in git
+data/cache/
+data/embeddings/
+data/labeled_15k/
+data/interim/labeled_dataset.tsv
+data/raw/
+
+# Model weights (tracked separately via HF Hub or LFS)
+*.pt
+*.ckpt
+*.bin
+hf_deploy/prism-model/
+
+# Results / outputs
+results/
+*.log
+*.out
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+
+# Secrets / env
+.env
+*.env
+secrets/
+
+# Temp
+tmp/
+/tmp/

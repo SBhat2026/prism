@@ -1,0 +1,30 @@
+name: prot-assembly
+channels:
+  - pytorch
+  - pyg
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pytorch>=2.5
+  - torchvision
+  - pip
+  - pip:
+    - fair-esm>=2.0.0
+    - torch-geometric
+    - torch-scatter
+    - torch-sparse
+    - biopython>=1.83
+    - freesasa>=2.1
+    - requests
+    - networkx>=3.0
+    - numpy
+    - scipy
+    - pandas
+    - matplotlib
+    - seaborn
+    - tqdm
+    - scikit-learn
+    - jupyter
+    - ipykernel
+    - huggingface_hub
