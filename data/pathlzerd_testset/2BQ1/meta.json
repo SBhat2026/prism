@@ -1,0 +1,24 @@
+{
+  "pdb_id": "2BQ1",
+  "chain_ids": [
+    "E",
+    "F",
+    "I",
+    "J"
+  ],
+  "sequences": [
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM"
+  ],
+  "gt_order": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "complex_type": "homomer",
+  "gt_source": "sasa_greedy",
+  "n_chains": 4
+}

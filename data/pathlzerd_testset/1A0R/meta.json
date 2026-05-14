@@ -1,0 +1,21 @@
+{
+  "pdb_id": "1A0R",
+  "chain_ids": [
+    "B",
+    "G",
+    "P"
+  ],
+  "sequences": [
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM"
+  ],
+  "gt_order": [
+    0,
+    1,
+    2
+  ],
+  "complex_type": "homomer",
+  "gt_source": "sasa_greedy",
+  "n_chains": 3
+}
