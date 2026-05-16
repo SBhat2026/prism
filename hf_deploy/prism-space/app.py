@@ -15,6 +15,9 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 import gradio as gr
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from pathlib import Path
 from scipy.stats import kendalltau, spearmanr
 from huggingface_hub import hf_hub_download
@@ -698,5 +701,183 @@ Edge features: PPI (STRING) · ESM cosine sim · GO Jaccard · normalised BSA
 **Metrics (v1.0):** τ=1.000 (Marsh 2013) · τ=0.974 (held-out GT v2) · ρ=0.981 · MRR=0.94 · NDCG=0.96
 """)
 
+# ── FastAPI app with /api/mutate ──────────────────────────────────────────────
+
+_AA1_VALID = frozenset("ACDEFGHIKLMNPQRSTVWY")
+
+class MutateRequest(BaseModel):
+    pdb_id: str
+    chain: str
+    position: int
+    original_aa: str
+    mutant_aa: str
+    n_runs: int = 1
+
+
+def _compute_kl_per_step(wt_steps, mut_steps, eps=1e-9):
+    kls = []
+    for wt_s, mut_s in zip(wt_steps, mut_steps):
+        wt_d  = {c: p for c, p in zip(wt_s["candidates"],  wt_s["probs"])}
+        mut_d = {c: p for c, p in zip(mut_s["candidates"], mut_s["probs"])}
+        idx = sorted(set(wt_d) | set(mut_d))
+        p = np.clip([wt_d.get(i, eps)  for i in idx], eps, None); p /= p.sum()
+        q = np.clip([mut_d.get(i, eps) for i in idx], eps, None); q /= q.sum()
+        kls.append(round(float(np.sum(p * np.log(p / q))), 4))
+    return kls
+
+
+def _detect_redirect(wt_order, mut_order):
+    n = min(len(wt_order), len(mut_order))
+    for i in range(n):
+        if wt_order[i] != mut_order[i]:
+            return {"redirected": True, "first_diff": i, "num_swapped": n - i}
+    return {"redirected": False, "first_diff": None, "num_swapped": 0}
+
+
+def _run_assembly(model, nf, ef, adj, N, is_homomer):
+    if is_homomer:
+        best_tau, best_order, best_steps = -2.0, None, None
+        for seed in range(N):
+            order, steps = greedy_prism(model, nf, ef, adj, N, seed)
+            tau = circular_tau(order, list(range(N)))
+            if tau > best_tau:
+                best_tau, best_order, best_steps = tau, order, steps
+        return best_order, best_steps
+    else:
+        return greedy_prism(model, nf, ef, adj, N, 0)
+
+
+def _build_tensors(emb_mat, plddt_f, bsa_mat):
+    N = emb_mat.shape[0]
+    norms   = np.linalg.norm(emb_mat, axis=1, keepdims=True)
+    esm_cos = (emb_mat / (norms + 1e-8) @ (emb_mat / (norms + 1e-8)).T).clip(-1, 1).astype(np.float32)
+    sasa_n  = bsa_mat / (bsa_mat.max() + 1e-8)
+    sasa_d  = np.diag(sasa_n).reshape(-1, 1).astype(np.float32)
+    nf = torch.tensor(np.hstack([emb_mat, plddt_f, sasa_d]), dtype=torch.float32)
+    ef = build_edge_features(
+        np.zeros((N, N), dtype=np.float32), esm_cos,
+        np.zeros((N, N), dtype=np.float32), sasa_n,
+    )
+    adj = torch.ones(N, N, dtype=torch.bool)
+    return nf, ef, adj
+
+
+fastapi_app = FastAPI(title="PRISM API")
+fastapi_app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+@fastapi_app.post("/api/mutate")
+def mutate_api(req: MutateRequest):
+    pdb_id = req.pdb_id.strip().upper()
+    chain  = req.chain.strip().upper()
+    pos    = req.position
+
+    if req.original_aa.upper() not in _AA1_VALID:
+        raise HTTPException(400, f"Invalid original_aa: {req.original_aa!r}")
+    if req.mutant_aa.upper() not in _AA1_VALID:
+        raise HTTPException(400, f"Invalid mutant_aa: {req.mutant_aa!r}")
+
+    try:
+        pdb_text = download_pdb(pdb_id)
+    except Exception as e:
+        raise HTTPException(404, f"Failed to download {pdb_id}: {e}")
+
+    seq_map = extract_sequences(pdb_text)
+    if chain not in seq_map:
+        raise HTTPException(400, f"Chain {chain!r} not found in {pdb_id}. Available: {sorted(seq_map)}")
+
+    chain_ids = sorted(seq_map.keys())
+    chain_idx = chain_ids.index(chain)
+    orig_seq  = seq_map[chain]
+    N = len(chain_ids)
+
+    if not (1 <= pos <= len(orig_seq)):
+        raise HTTPException(400, f"Position {pos} out of range [1, {len(orig_seq)}]")
+    actual_aa = orig_seq[pos - 1].upper()
+    if actual_aa != req.original_aa.upper():
+        raise HTTPException(400, f"Position {pos} has {actual_aa!r}, not {req.original_aa.upper()!r}")
+
+    sequences = [seq_map[c] for c in chain_ids]
+    is_homomer = len(set(sequences)) == 1
+
+    try:
+        bsa_mat = compute_bsa_matrix(pdb_text, chain_ids)
+    except Exception as e:
+        raise HTTPException(500, f"BSA computation failed: {e}")
+
+    plddt_f = fetch_plddt_for_chains(pdb_id, chain_ids)
+    plddt_f[:, 0] /= 100.0; plddt_f[:, 3] /= 100.0; plddt_f[:, 4] /= 100.0
+
+    model = _load_model()
+
+    wt_emb  = embed_sequences({f"c{i}": s for i, s in enumerate(sequences)})
+    wt_mat  = np.stack([wt_emb[f"c{i}"] for i in range(N)])
+    wt_nf, wt_ef, wt_adj = _build_tensors(wt_mat, plddt_f, bsa_mat)
+    wt_order, wt_steps   = _run_assembly(model, wt_nf, wt_ef, wt_adj, N, is_homomer)
+
+    mut_seqs = sequences[:]
+    mut_seqs[chain_idx] = orig_seq[:pos-1] + req.mutant_aa.upper() + orig_seq[pos:]
+    mut_emb_single = embed_sequences({f"c{chain_idx}": mut_seqs[chain_idx]})
+    mut_mat = wt_mat.copy()
+    mut_mat[chain_idx] = mut_emb_single[f"c{chain_idx}"]
+    mut_nf, mut_ef, mut_adj = _build_tensors(mut_mat, plddt_f, bsa_mat)
+    mut_order, mut_steps    = _run_assembly(model, mut_nf, mut_ef, mut_adj, N, is_homomer)
+
+    sasa_order = sasa_greedy_order(bsa_mat)
+
+    def _tau(pred, gt):
+        if len(pred) < 2: return 0.0
+        stat, _ = kendalltau([pred.index(x) for x in gt], list(range(len(gt))))
+        return float(stat) if not np.isnan(stat) else 0.0
+
+    if is_homomer:
+        wt_tau  = circular_tau(wt_order,  list(range(N)))
+        mut_tau = circular_tau(mut_order, list(range(N)))
+    else:
+        wt_tau  = _tau(wt_order,  sasa_order)
+        mut_tau = _tau(mut_order, sasa_order)
+
+    def _gt_probs(steps):
+        out = []
+        for t, step in enumerate(steps):
+            cands, ps = step["candidates"], step["probs"]
+            nxt = sasa_order[t+1] if t+1 < len(sasa_order) else None
+            if nxt is not None and nxt in cands:
+                out.append(round(float(ps[cands.index(nxt)]), 4))
+        return out
+
+    wt_gt  = _gt_probs(wt_steps)
+    mut_gt = _gt_probs(mut_steps)
+
+    def _top1(steps):
+        hits = sum(1 for t, s in enumerate(steps)
+                   if t+1 < len(sasa_order) and s["chosen"] == sasa_order[t+1])
+        return round(hits / max(len(steps), 1), 4)
+
+    redirect = _detect_redirect(wt_order, mut_order)
+    kl       = _compute_kl_per_step(wt_steps, mut_steps)
+
+    return {
+        "pdb_id":      pdb_id, "chain": chain, "position": pos,
+        "original_aa": req.original_aa.upper(), "mutant_aa": req.mutant_aa.upper(),
+        "wt":  {"tau": wt_tau,  "top1_acc": _top1(wt_steps),  "pred_order": wt_order,  "gt_prob_per_step": wt_gt},
+        "mut": {"tau": mut_tau, "top1_acc": _top1(mut_steps), "pred_order": mut_order, "gt_prob_per_step": mut_gt},
+        "deltas": {
+            "tau": round(mut_tau - wt_tau, 4),
+            "top1_acc": round(_top1(mut_steps) - _top1(wt_steps), 4),
+            "gt_prob_per_step": [round(m-w, 4) for w, m in zip(wt_gt, mut_gt)],
+        },
+        "kl_per_step": kl,
+        "redirected":  redirect["redirected"],
+        "redirect_info": redirect,
+        "go_delta": {"gained": [], "lost": []},
+        "subunit_name": chain, "uniprot": chain,
+    }
+
+
+# Mount Gradio on FastAPI
+app = gr.mount_gradio_app(fastapi_app, demo, path="/")
+
 if __name__ == "__main__":
-    demo.launch()
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=7860)

@@ -7,3 +7,6 @@ scipy
 requests
 gradio>=4.0
 huggingface_hub
+fastapi>=0.100
+uvicorn[standard]
+pydantic>=2.0
