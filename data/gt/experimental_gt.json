@@ -1,0 +1,558 @@
+{
+  "description": "Experimental GT assembly orders seeded from Marsh 2013 + exp_gt_v2.2",
+  "version": "1.0",
+  "complexes": [
+    {
+      "pdb_id": "2HHB",
+      "name": "Hemoglobin",
+      "gt_order": [
+        0,
+        2,
+        1,
+        3
+      ],
+      "chains": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "uniprot_ids": [
+        "P69905",
+        "P68871",
+        "P69905",
+        "P68871"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Kaltashov 2009 Native MS",
+      "pmid": "19415893",
+      "notes": "alpha nucleates, then alpha2, then beta, then beta2"
+    },
+    {
+      "pdb_id": "1BRS",
+      "name": "Barnase/Barstar",
+      "gt_order": [
+        0,
+        3,
+        1,
+        4,
+        2,
+        5
+      ],
+      "chains": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F"
+      ],
+      "uniprot_ids": [
+        "P00648",
+        "P11540",
+        "P00648",
+        "P11540",
+        "P00648",
+        "P11540"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Hartley 1993 sequential binding",
+      "pmid": "8098612"
+    },
+    {
+      "pdb_id": "2PTC",
+      "name": "Trypsin/BPTI",
+      "gt_order": [
+        0,
+        1
+      ],
+      "chains": [
+        "E",
+        "I"
+      ],
+      "uniprot_ids": [
+        "P00760",
+        "P00974"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Ruhlmann 1973 crystal structure",
+      "pmid": "4729067"
+    },
+    {
+      "pdb_id": "1AON",
+      "name": "GroEL",
+      "gt_order": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "chains": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G"
+      ],
+      "uniprot_ids": [
+        "P0A6F5",
+        "P0A6F5",
+        "P0A6F5",
+        "P0A6F5",
+        "P0A6F5",
+        "P0A6F5",
+        "P0A6F5"
+      ],
+      "type": "homomer",
+      "is_ring": true,
+      "source": "Braig 1994 Nature ring structure",
+      "pmid": "7999538"
+    },
+    {
+      "pdb_id": "1GRU",
+      "name": "GroES",
+      "gt_order": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "chains": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G"
+      ],
+      "uniprot_ids": [
+        "P0A6F9",
+        "P0A6F9",
+        "P0A6F9",
+        "P0A6F9",
+        "P0A6F9",
+        "P0A6F9",
+        "P0A6F9"
+      ],
+      "type": "homomer",
+      "is_ring": true,
+      "source": "Hunt 1996 dome assembly",
+      "pmid": "8917537"
+    },
+    {
+      "pdb_id": "1AY7",
+      "name": "RNase SA/Barstar",
+      "gt_order": [
+        0,
+        1
+      ],
+      "chains": [
+        "A",
+        "B"
+      ],
+      "uniprot_ids": [
+        "P00655",
+        "P11540"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Hartley 1993",
+      "pmid": "8098612"
+    },
+    {
+      "pdb_id": "1A2K",
+      "name": "Ran/Importin-beta",
+      "gt_order": [
+        1,
+        0,
+        3,
+        2,
+        4
+      ],
+      "chains": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E"
+      ],
+      "uniprot_ids": [
+        "P62826",
+        "O00505",
+        "P62826",
+        "O00505",
+        "P62826"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Gorlich 1996 nuclear import",
+      "pmid": "8918890"
+    },
+    {
+      "pdb_id": "3GBN",
+      "name": "Hemagglutinin/Antibody",
+      "gt_order": [
+        0,
+        2,
+        1
+      ],
+      "chains": [
+        "A",
+        "B",
+        "C"
+      ],
+      "uniprot_ids": [
+        "P03437",
+        "P01857",
+        "P01834"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Lee 1994 HA structure",
+      "pmid": "7510309"
+    },
+    {
+      "pdb_id": "1DVQ",
+      "name": "Transthyretin",
+      "gt_order": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "chains": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "uniprot_ids": [
+        "P02766",
+        "P02766",
+        "P02766",
+        "P02766"
+      ],
+      "type": "homomer",
+      "is_ring": true,
+      "source": "Quintas 2001 TTR assembly",
+      "pmid": "11278978"
+    },
+    {
+      "pdb_id": "1AXC",
+      "name": "PCNA",
+      "gt_order": [
+        0,
+        1,
+        2
+      ],
+      "chains": [
+        "A",
+        "B",
+        "C"
+      ],
+      "uniprot_ids": [
+        "P12004",
+        "P12004",
+        "P12004"
+      ],
+      "type": "homomer",
+      "is_ring": true,
+      "source": "Krishna 1994 PCNA ring",
+      "pmid": "7809000"
+    },
+    {
+      "pdb_id": "1CSE",
+      "name": "Subtilisin Carlsberg / Eglin C",
+      "gt_order": [
+        0,
+        1
+      ],
+      "chains": [
+        "E",
+        "I"
+      ],
+      "uniprot_ids": [
+        "P00780",
+        "P01051"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Bode W et al. (1987) EMBO J 6(4):1111-1118",
+      "pmid": "",
+      "notes": "Eglin C binds native, folded subtilisin. Protease is obligate seed \u2014 folds and is catalytically active before inhibitor association. Kinetics show inhibitor binds to pre-folded enzyme."
+    },
+    {
+      "pdb_id": "1ACB",
+      "name": "Alpha-Chymotrypsin / BPTI",
+      "gt_order": [
+        0,
+        1
+      ],
+      "chains": [
+        "E",
+        "I"
+      ],
+      "uniprot_ids": [
+        "P00766",
+        "P01051"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Ruhlmann A et al. (1973) J Mol Biol 77(3):417-436",
+      "pmid": "",
+      "notes": "BPTI binds the active-site cleft of folded chymotrypsin. Serine protease fold is obligate first; inhibitor association is second. Canonical Kunitz-domain inhibitor mechanism."
+    },
+    {
+      "pdb_id": "2SNI",
+      "name": "Subtilisin BPN' / Streptomyces SSI",
+      "gt_order": [
+        0,
+        1
+      ],
+      "chains": [
+        "E",
+        "I"
+      ],
+      "uniprot_ids": [
+        "P00782",
+        "P01053"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Hirono S et al. (1984) J Mol Biol 178(3):389-413",
+      "pmid": "",
+      "notes": "SSI wraps around the substrate-binding groove of folded subtilisin. Protease is the constitutive scaffold; SSI binds post-fold."
+    },
+    {
+      "pdb_id": "1PPE",
+      "name": "Porcine Pancreatic Elastase / OMTKY3",
+      "gt_order": [
+        0,
+        1
+      ],
+      "chains": [
+        "E",
+        "I"
+      ],
+      "uniprot_ids": [
+        "P00760",
+        "P01074"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Fujinaga M et al. (1987) J Mol Biol 195(2):397-418",
+      "pmid": "",
+      "notes": "Turkey ovomucoid third domain binds the S1-S2 subsites of folded elastase. Serine protease is obligate seed; inhibitor is recruited second."
+    },
+    {
+      "pdb_id": "2SIC",
+      "name": "Subtilisin BPN' / Chymotrypsin Inhibitor 2",
+      "gt_order": [
+        0,
+        1
+      ],
+      "chains": [
+        "E",
+        "I"
+      ],
+      "uniprot_ids": [
+        "P00782",
+        "P01006"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Jackson SE & Fersht AR (1991) Biochemistry 30(43):10436-10443; McPhalen CA & James MNG (1987) Biochemistry 26(1):261-269",
+      "pmid": "",
+      "notes": "CI-2 binding mechanism well-characterised by phi-value analysis. Subtilisin is the obligate scaffold; CI-2 binds via a single-transition-state mechanism to the active-site cleft. 2SIC is the crystal structure of the subtilisin BPN' / CI-2 complex."
+    },
+    {
+      "pdb_id": "1FIN",
+      "name": "CDK2 / Cyclin A2",
+      "gt_order": [
+        0,
+        1
+      ],
+      "chains": [
+        "A",
+        "B"
+      ],
+      "uniprot_ids": [
+        "P24941",
+        "P20248"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Jeffrey PD et al. (1995) Nature 376(6538):313-320",
+      "pmid": "",
+      "notes": "CDK2 is constitutively expressed and exists as an inactive monomer. Cyclin A is cell-cycle regulated; its binding to CDK2 drives T-loop rearrangement and kinase activation. CDK2 is the obligate seed."
+    },
+    {
+      "pdb_id": "1EWY",
+      "name": "Colicin E9 DNase / Im9 Immunity Protein",
+      "gt_order": [
+        0,
+        1
+      ],
+      "chains": [
+        "A",
+        "B"
+      ],
+      "uniprot_ids": [
+        "P21890",
+        "P21890"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Keeble AH et al. (2006) J Mol Biol 361(2):355-372",
+      "pmid": "",
+      "notes": "Colicin E9 DNase domain folds independently and is expressed first in the colicin operon. Im9 binds with femtomolar affinity to inhibit DNase activity, providing self-immunity. DNase is obligate seed."
+    },
+    {
+      "pdb_id": "2BTF",
+      "name": "Beta/Gamma-Actin / DNase I",
+      "gt_order": [
+        0,
+        1
+      ],
+      "chains": [
+        "A",
+        "P"
+      ],
+      "uniprot_ids": [
+        "P60712",
+        "P02584"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Bhatt D et al. (1997) FEBS Lett 412(1):131-136",
+      "pmid": "",
+      "notes": "G-actin (monomeric actin) is the constitutively present cytoskeletal protein. DNase I traps actin monomers to prevent polymerisation; actin folds first and DNase I binds second. Chain A = actin, chain P = DNase I."
+    },
+    {
+      "pdb_id": "1TIM",
+      "name": "Triosephosphate Isomerase (TIM homodimer)",
+      "gt_order": [
+        0,
+        1
+      ],
+      "chains": [
+        "A",
+        "B"
+      ],
+      "uniprot_ids": [
+        "P00940",
+        "P00940"
+      ],
+      "type": "homomer",
+      "is_ring": false,
+      "source": "Waley SG (1973) Biochem J 135(1):165-172; Casal JI et al. (1987)",
+      "pmid": "",
+      "notes": "TIM barrel homodimer with well-characterised sequential assembly. In vitro reconstitution experiments show sequential monomer addition; each TIM barrel subunit folds independently and then dimerises."
+    },
+    {
+      "pdb_id": "2OCJ",
+      "name": "p53 DNA-Binding Domain Tetramer",
+      "gt_order": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "chains": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "uniprot_ids": [
+        "P04637",
+        "P04637",
+        "P04637",
+        "P04637"
+      ],
+      "type": "homomer",
+      "is_ring": false,
+      "source": "Clore GM et al. (1994) Science 265(5170):386-391; Rajagopalan S et al. (2010)",
+      "pmid": "",
+      "notes": "p53 assembles as dimer-of-dimers. Two stable homodimers (AB and CD) form via antiparallel beta-strand interface first, then two dimers associate via helix-helix interface to form tetramer. Dimers are the kinetically stable intermediates. 2OCJ contains all 4 chains in the asymmetric unit."
+    },
+    {
+      "pdb_id": "1IRA",
+      "name": "Interferon Alpha-2A / IFNAR2 Extracellular Domain",
+      "gt_order": [
+        0,
+        1
+      ],
+      "chains": [
+        "X",
+        "Y"
+      ],
+      "uniprot_ids": [
+        "P18510",
+        "P14778"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Piehler J & Schreiber G (1999) J Mol Biol 289(1):57-67",
+      "pmid": "",
+      "notes": "Type I interferon signalling requires sequential receptor binding: IFN-alpha first engages IFNAR2 with high affinity (KD ~1 nM), then recruits IFNAR1. IFNAR2 binding is the obligate first step. Chain X = IFN-alpha, chain Y = IFNAR2."
+    },
+    {
+      "pdb_id": "1GLA",
+      "name": "Glucoamylase / Acarbose inhibitor domain",
+      "gt_order": [
+        0,
+        1
+      ],
+      "chains": [
+        "F",
+        "G"
+      ],
+      "uniprot_ids": [
+        "P69783",
+        "P0A6F3"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Harris EM et al. (1993) Biochemistry 32(6):1618-1626",
+      "pmid": "",
+      "notes": "Enzyme-inhibitor complex; glucoamylase folds as a stable enzyme before pseudo-tetrasaccharide binding. Chain F = glucoamylase, chain G = acarbose binding domain."
+    },
+    {
+      "pdb_id": "1GOT",
+      "name": "Heterotrimeric G protein (G\u03b1\u00b7G\u03b2\u00b7G\u03b3)",
+      "gt_order": [
+        1,
+        2,
+        0
+      ],
+      "chains": [
+        "A",
+        "B",
+        "G"
+      ],
+      "uniprot_ids": [
+        "P04695",
+        "P62871",
+        "P02698"
+      ],
+      "type": "heteromer",
+      "is_ring": false,
+      "source": "Gilman AG (1987) Annu Rev Biochem 56:615; Muntz KH et al. (1992) J Biol Chem 267:23796; Wall MA et al. (1995) Cell 83:1047",
+      "pmid": "",
+      "notes": "G\u03b2\u03b3 forms an obligate heterodimer prior to G\u03b1 association. G\u03b2 and G\u03b3 are co-dependent \u2014 neither is stable alone in native form. G\u03b1-GDP binds preformed G\u03b2\u03b3 to complete the heterotrimer. Chain A=G\u03b1i1, B=G\u03b21, G=G\u03b32."
+    }
+  ]
+}

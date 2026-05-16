@@ -52,6 +52,7 @@ def evaluate_complex(
     edge_feats: torch.Tensor,
     adj: torch.Tensor,
     device: str = "cpu",
+    copy_indices=None,
 ) -> dict:
     """
     Full metric suite for one complex.
@@ -69,11 +70,11 @@ def evaluate_complex(
     # Greedy prediction seeded at GT[0] (heteromers) or best-seed (homomers)
     if is_homomer:
         pred_order, step_probs, step_top1 = _greedy_best_seed(
-            model, N, node_feats, edge_feats, adj, gt, device
+            model, N, node_feats, edge_feats, adj, gt, device, copy_indices=copy_indices
         )
     else:
         pred_order, step_probs, step_top1 = _greedy_seed(
-            model, N, gt[0], node_feats, edge_feats, adj, gt, device
+            model, N, gt[0], node_feats, edge_feats, adj, gt, device, copy_indices=copy_indices
         )
 
     # τ
@@ -109,7 +110,8 @@ def evaluate_complex(
     }
 
 
-def _greedy_seed(model, N, seed, node_feats, edge_feats, adj, gt, device, h=None):
+def _greedy_seed(model, N, seed, node_feats, edge_feats, adj, gt, device, h=None,
+                 copy_indices=None):
     """Greedy assembly from fixed seed. Pass h to avoid redundant embed."""
     order = [seed]
     remaining = [i for i in range(N) if i != seed]
@@ -117,7 +119,8 @@ def _greedy_seed(model, N, seed, node_feats, edge_feats, adj, gt, device, h=None
 
     with torch.no_grad():
         if h is None:
-            h = model.embed(node_feats.to(device), adj.to(device), edge_feats.to(device))
+            h = model.embed(node_feats.to(device), adj.to(device), edge_feats.to(device),
+                            copy_indices.to(device) if copy_indices is not None else None)
         for step in range(N - 1):
             if not remaining:
                 break
@@ -150,14 +153,16 @@ def _greedy_seed(model, N, seed, node_feats, edge_feats, adj, gt, device, h=None
     return order, step_probs, step_top1
 
 
-def _greedy_best_seed(model, N, node_feats, edge_feats, adj, gt, device):
+def _greedy_best_seed(model, N, node_feats, edge_feats, adj, gt, device, copy_indices=None):
     """For homomers: try all N seeds, return best-τ result. Embeds once for all seeds."""
     best_tau = -2.0
     best_result = None
     with torch.no_grad():
-        h = model.embed(node_feats.to(device), adj.to(device), edge_feats.to(device))
+        h = model.embed(node_feats.to(device), adj.to(device), edge_feats.to(device),
+                        copy_indices.to(device) if copy_indices is not None else None)
     for seed in range(N):
-        order, probs, top1 = _greedy_seed(model, N, seed, node_feats, edge_feats, adj, gt, device, h=h)
+        order, probs, top1 = _greedy_seed(model, N, seed, node_feats, edge_feats, adj, gt, device,
+                                           h=h, copy_indices=copy_indices)
         tau = circular_tau(order, gt)
         if tau > best_tau:
             best_tau = tau
@@ -172,8 +177,14 @@ def evaluate_dataset(model, dataset, precomputed, device="cpu") -> dict:
     """
     results = {}
     for cdata in dataset:
-        nf, ef, adj = precomputed[cdata.pdb_id]
-        results[cdata.pdb_id] = evaluate_complex(model, cdata, nf, ef, adj, device)
+        entry = precomputed[cdata.pdb_id]
+        # Support both 3-tuple (legacy) and 4-tuple (copy_indices added in Step 10)
+        if len(entry) == 4:
+            nf, ef, adj, ci = entry
+        else:
+            nf, ef, adj = entry
+            ci = None
+        results[cdata.pdb_id] = evaluate_complex(model, cdata, nf, ef, adj, device, copy_indices=ci)
 
     taus   = [v["tau"]            for v in results.values()]
     top1s  = [v["top1_accuracy"]  for v in results.values()]

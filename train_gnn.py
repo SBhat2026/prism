@@ -40,7 +40,8 @@ ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
 
 from src.models.scorer_gnn import (
-    AssemblyScorer, build_node_features, build_edge_features, build_adjacency
+    AssemblyScorer, build_node_features, build_edge_features, build_adjacency,
+    build_copy_indices,
 )
 from src.training.dataset import ComplexData, build_examples, build_step_groups
 from src.training.losses import kendall_tau_from_order
@@ -48,6 +49,11 @@ from src.data_prep.plddt_fetcher import (
     get_chain_uniprot_ids, fetch_plddt_stats, stats_to_node_vec, PLDDT_NODE_DIM
 )
 from src.evaluation.metrics import evaluate_dataset
+from src.data_prep.geom_features import build_geom_matrix, GEOM_DIM
+from src.data_prep.voronoi_interface import compute_contact_density_matrix
+
+MODEL_VERSION = "v4"
+GEOM_CACHE    = ROOT / "data" / "feature_cache"
 
 GNN_DIR      = ROOT / "results" / "gnn_training"
 EPOCH_DIR    = GNN_DIR / "epochs"
@@ -60,21 +66,39 @@ DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
 
 # ── Data loading (reuse cached outputs from run_alpha.py) ────────────────────
 
-BENCHMARK = {
-    "2HHB": {"chains": ["A","B","C","D"],         "gt_order": [0,1,3,2],       "type": "heteromer",
-             "subcomplexes": [[0,1],[2,3]]},  # α₁β₁ dimer + α₂β₂ dimer (A+B, C+D)
-    "1BRS": {"chains": ["A","B","C","D","E","F"],  "gt_order": [0,3,1,4,2,5],  "type": "heteromer",
-             "subcomplexes": [[0,1],[2,3],[4,5]]},  # Barnase+Barstar pairs (A+B, C+D, E+F)
-    "1AY7": {"chains": ["A","B"],                  "gt_order": [0,1],           "type": "heteromer"},
-    "1TGS": {"chains": ["Z","I"],                  "gt_order": [0,1],           "type": "heteromer"},
-    "2PTC": {"chains": ["E","I"],                  "gt_order": [0,1],           "type": "heteromer"},
-    "1A2K": {"chains": ["A","B","C","D","E"],      "gt_order": [1,0,3,2,4],    "type": "heteromer"},
-    "1SBB": {"chains": ["A","B","C","D"],          "gt_order": [2,0,3,1],      "type": "heteromer"},
-    "3GBN": {"chains": ["A","H","L"],              "gt_order": [0,1,2],         "type": "heteromer",
-             "subcomplexes": [[1,2],[0]]},  # Fab (H+L) pre-assembles; HA antigen (A) is the target
-    "1AON": {"chains": list("ABCDEFG"),            "gt_order": list(range(7)),  "type": "homomer"},
-    "1GRU": {"chains": list("ABCDEFG"),            "gt_order": list(range(7)),  "type": "homomer"},
+# PDB chain IDs and subcomplex topology — requires structural/domain knowledge, kept in code.
+# gt_order is loaded from data/gt/experimental_gt.json (literature-sourced, authoritative).
+_BENCHMARK_STRUCTURE = {
+    "2HHB": {"chains": ["A","B","C","D"],        "type": "heteromer", "subcomplexes": [[0,1],[2,3]]},
+    "1BRS": {"chains": ["A","B","C","D","E","F"],"type": "heteromer", "subcomplexes": [[0,1],[2,3],[4,5]]},
+    "1AY7": {"chains": ["A","B"],                "type": "heteromer"},
+    "1TGS": {"chains": ["Z","I"],                "type": "heteromer"},
+    "2PTC": {"chains": ["E","I"],                "type": "heteromer"},
+    "1A2K": {"chains": ["A","B","C","D","E"],    "type": "heteromer"},
+    "1SBB": {"chains": ["A","B","C","D"],        "type": "heteromer"},
+    "3GBN": {"chains": ["A","H","L"],            "type": "heteromer", "subcomplexes": [[1,2],[0]]},
+    "1AON": {"chains": list("ABCDEFG"),          "type": "homomer"},
+    "1GRU": {"chains": list("ABCDEFG"),          "type": "homomer"},
 }
+
+def _load_benchmark() -> dict:
+    _gt_by_pdb = {}
+    gt_path = ROOT / "data" / "gt" / "experimental_gt.json"
+    if gt_path.exists():
+        data = json.loads(gt_path.read_text())
+        for entry in data.get("complexes", []):
+            _gt_by_pdb[entry["pdb_id"]] = entry["gt_order"]
+    result = {}
+    for pdb_id, struct in _BENCHMARK_STRUCTURE.items():
+        N = len(struct["chains"])
+        entry = {"chains": struct["chains"], "type": struct["type"],
+                 "gt_order": _gt_by_pdb.get(pdb_id, list(range(N)))}
+        if "subcomplexes" in struct:
+            entry["subcomplexes"] = struct["subcomplexes"]
+        result[pdb_id] = entry
+    return result
+
+BENCHMARK = _load_benchmark()
 
 
 def _load_plddt_for_complex(pdb_id: str, chains: list[str]) -> np.ndarray:
@@ -201,6 +225,7 @@ def load_dataset_from_alpha(fetch_plddt: bool = True) -> list[ComplexData]:
             plddt=plddt,
             gt_source="experimental",
             subcomplexes=meta.get("subcomplexes"),
+            pdb_path=pdb_path if Path(pdb_path).exists() else None,
         ))
         print(f"  {pdb_id}: sasa_max={sasa_mat.max():.1f} "
               f"plddt_mean={plddt[:,0].mean():.1f} ppi_max={ppi_mat.max():.3f}")
@@ -261,6 +286,7 @@ def load_expanded_dataset() -> list[ComplexData]:
             esm_embeddings=emb_mat,
             plddt=plddt,
             gt_source=meta.get("gt_source", "sasa_greedy"),
+            uniprot_ids=meta.get("uniprot_ids", []),
         ))
 
     print(f"[data] loaded {len(dataset)} expanded complexes")
@@ -314,6 +340,7 @@ def load_experimental_v2_dataset() -> list[ComplexData]:
             esm_embeddings=emb_mat,
             plddt=plddt,
             gt_source="experimental",
+            uniprot_ids=meta.get("uniprot_ids", []),
         ))
 
     print(f"[data] loaded {len(dataset)} experimental_v2 complexes")
@@ -331,6 +358,7 @@ def score_step_gnn(
     edge_feats: torch.Tensor,
     adj: torch.Tensor,
     h: Optional[torch.Tensor] = None,
+    copy_indices: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Score all candidates at one step. Pass precomputed h to avoid redundant embed."""
     model.eval()
@@ -340,24 +368,26 @@ def score_step_gnn(
         if assembled:
             assembled_mask[assembled] = True
         if h is None:
-            h = model.embed(node_feats, adj, edge_feats)
+            h = model.embed(node_feats, adj, edge_feats, copy_indices)
         return model.score_candidates(h, edge_feats, assembled_mask, candidates)
 
 
 def greedy_gnn(model: AssemblyScorer, cdata: ComplexData,
-               node_feats, edge_feats, adj) -> list[int]:
+               node_feats, edge_feats, adj,
+               copy_indices: Optional[torch.Tensor] = None) -> list[int]:
     """Greedy assembly order predicted by GNN. Embeds once, reuses h per step."""
     N = len(cdata.chain_ids)
     model.eval()
     with torch.no_grad():
-        h = model.embed(node_feats, adj, edge_feats)
+        h = model.embed(node_feats, adj, edge_feats, copy_indices)
     order = [cdata.gt_order[0]]
     remaining = [i for i in range(N) if i != order[0]]
     for _ in range(N - 1):
         if not remaining:
             break
         scores = score_step_gnn(model, cdata, order, remaining,
-                                 node_feats, edge_feats, adj, h=h)
+                                 node_feats, edge_feats, adj, h=h,
+                                 copy_indices=copy_indices)
         best   = remaining[int(scores.argmax().item())]
         order.append(best)
         remaining.remove(best)
@@ -368,10 +398,11 @@ def greedy_gnn(model: AssemblyScorer, cdata: ComplexData,
 
 def precompute(cdata: ComplexData, esm_dim: int = 320):
     """
-    Returns (node_feats, edge_feats, adj) for one complex.
+    Returns (node_feats, edge_feats, adj, copy_indices) for one complex.
 
-    Node features: ESM (640d) + pLDDT (5d) + SASA_diag (1d) = 646d
-    Edge features: [ppi, esm_cos, go_cos, sasa_norm] = 4d
+    Node features: ESM (640d) + pLDDT (5d) + SASA_diag (1d) + geom (9d) = 655d
+    Edge features: [ppi, esm_cos, go_cos, sasa_norm, contact_density] = 5d
+    copy_indices: (N,) long — 0-indexed copy count per unique UniProt (Step 10)
     """
     N    = len(cdata.chain_ids)
     sasa = cdata.sasa_matrix / (cdata.sasa_matrix.max() + 1e-8)
@@ -389,19 +420,41 @@ def precompute(cdata: ComplexData, esm_dim: int = 320):
 
     sasa_diag = np.diag(sasa).astype(np.float32)
 
+    # Monomer geometry features (9d per chain from AlphaFold CA coords + pLDDT)
+    geom_cache_dir = GEOM_CACHE / "af_pdbs"
+    uniprot_ids    = cdata.uniprot_ids or [""] * N
+    sequences      = cdata.sequences or ["M" * 100] * N
+    geom_feats     = build_geom_matrix(uniprot_ids, geom_cache_dir, sequences)  # (N, 9)
+
     node_feats = np.hstack([
         cdata.esm_embeddings.astype(np.float32),  # (N, esm_dim)
         plddt_feats,                               # (N, 5)
         sasa_diag.reshape(-1, 1),                  # (N, 1)
+        geom_feats,                                # (N, 9)
     ])
     node_feats_t = torch.tensor(node_feats, dtype=torch.float32)
 
+    # Voronoi contact density (only available when full-complex PDB is present)
+    contact_density = None
+    if cdata.pdb_path:
+        try:
+            cache_path = str(GEOM_CACHE / f"{cdata.pdb_id}_contact.npy")
+            contact_density = compute_contact_density_matrix(
+                cdata.pdb_path, cdata.chain_ids, cache_path=cache_path
+            )
+        except Exception:
+            contact_density = None
+
     edge_feats_t = build_edge_features(
-        cdata.ppi_matrix, cdata.esm_matrix, cdata.go_matrix, sasa
+        cdata.ppi_matrix, cdata.esm_matrix, cdata.go_matrix, sasa, contact_density
     )
     adj_dense = torch.ones(N, N, dtype=torch.bool)
+
+    # Copy-index embedding for symmetry breaking (Step 10)
+    copy_indices_t = build_copy_indices(uniprot_ids).to(DEVICE)
+
     # Move to device once at precompute time — avoids per-forward transfer overhead
-    return node_feats_t.to(DEVICE), edge_feats_t.to(DEVICE), adj_dense.to(DEVICE)
+    return node_feats_t.to(DEVICE), edge_feats_t.to(DEVICE), adj_dense.to(DEVICE), copy_indices_t
 
 
 # ── Training loss for GNN ────────────────────────────────────────────────────
@@ -524,9 +577,9 @@ def gnn_ranking_loss(
 
     for cdata in dataset:
         N = len(cdata.chain_ids)
-        node_feats, edge_feats, adj = precomputed[cdata.pdb_id]
+        node_feats, edge_feats, adj, copy_indices = precomputed[cdata.pdb_id]
         # Single embed for this complex — shared across all orderings
-        h = model.embed(node_feats, adj, edge_feats)
+        h = model.embed(node_feats, adj, edge_feats, copy_indices)
         orders = _get_orders(cdata)
 
         if cdata.complex_type == "homomer" or (getattr(cdata, 'subcomplexes', None) and len(orders) > 1):
@@ -572,15 +625,16 @@ def greedy_gnn_best_seed(
     model: AssemblyScorer,
     cdata: ComplexData,
     node_feats, edge_feats, adj,
+    copy_indices: Optional[torch.Tensor] = None,
 ) -> list[int]:
     """For homomers: try all N seeds, return best-τ ordering. Embeds once for all seeds."""
     if cdata.complex_type != "homomer":
-        return greedy_gnn(model, cdata, node_feats, edge_feats, adj)
+        return greedy_gnn(model, cdata, node_feats, edge_feats, adj, copy_indices)
 
     N = len(cdata.chain_ids)
     model.eval()
     with torch.no_grad():
-        h = model.embed(node_feats, adj, edge_feats)
+        h = model.embed(node_feats, adj, edge_feats, copy_indices)
 
     best_tau = -2.0
     best_order = None
@@ -591,7 +645,8 @@ def greedy_gnn_best_seed(
             if not remaining:
                 break
             scores = score_step_gnn(model, cdata, order, remaining,
-                                    node_feats, edge_feats, adj, h=h)
+                                    node_feats, edge_feats, adj, h=h,
+                                    copy_indices=copy_indices)
             best_c  = remaining[int(scores.argmax().item())]
             order.append(best_c)
             remaining.remove(best_c)
@@ -611,12 +666,12 @@ def eval_tau(model, dataset, precomputed) -> dict:
     """
     results = {}
     for cdata in dataset:
-        node_feats, edge_feats, adj = precomputed[cdata.pdb_id]
+        node_feats, edge_feats, adj, copy_indices = precomputed[cdata.pdb_id]
         if cdata.complex_type == "homomer":
-            pred = greedy_gnn_best_seed(model, cdata, node_feats, edge_feats, adj)
+            pred = greedy_gnn_best_seed(model, cdata, node_feats, edge_feats, adj, copy_indices)
             tau  = _circular_tau(pred, cdata.gt_order)
         else:
-            pred = greedy_gnn(model, cdata, node_feats, edge_feats, adj)
+            pred = greedy_gnn(model, cdata, node_feats, edge_feats, adj, copy_indices)
             tau  = kendall_tau_from_order(pred, cdata.gt_order)
         results[cdata.pdb_id] = tau
     return results
@@ -631,8 +686,8 @@ def eval_gt_prob(model, dataset, precomputed) -> float:
         for cdata in dataset:
             N     = len(cdata.chain_ids)
             order = cdata.gt_order
-            node_feats, edge_feats, adj = precomputed[cdata.pdb_id]
-            h = model.embed(node_feats, adj, edge_feats)
+            node_feats, edge_feats, adj, copy_indices = precomputed[cdata.pdb_id]
+            h = model.embed(node_feats, adj, edge_feats, copy_indices)
             for step in range(1, N):
                 assembled = order[:step]
                 correct   = order[step]
@@ -931,9 +986,9 @@ setInterval(loadLog, 5000);
 
 def populate_go_matrices(dataset: list[ComplexData], cache_dir: Path) -> None:
     """
-    Populate cdata.go_matrix for every complex using ProtFuncBridge (logit cosine).
+    Populate cdata.go_matrix for every complex using FABLEBridge (logit cosine).
     Caches per-complex to data/go_cache/{pdb_id}_go.npy — subsequent runs are instant.
-    Silently skips if ProtFuncBridge model files are unavailable.
+    Silently skips if FABLEBridge model files are unavailable.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     bridge = None
@@ -955,11 +1010,11 @@ def populate_go_matrices(dataset: list[ComplexData], cache_dir: Path) -> None:
         # Lazy-load bridge on first miss
         if bridge is None:
             try:
-                from src.protfunc_bridge.go_coherence import ProtFuncBridge, pairwise_go_matrix as _pwgo
-                bridge = ProtFuncBridge()
-                print("[go] ProtFuncBridge loaded for GO matrix population")
+                from src.protfunc_bridge.go_coherence import FABLEBridge, pairwise_go_matrix as _pwgo
+                bridge = FABLEBridge()
+                print("[go] FABLEBridge loaded for GO matrix population")
             except Exception as e:
-                print(f"[go] ProtFuncBridge unavailable ({e}) — go_matrix will be zeros")
+                print(f"[go] FABLEBridge unavailable ({e}) — go_matrix will be zeros")
                 return  # All remaining complexes stay zero
 
         try:
@@ -993,10 +1048,10 @@ def calibrate_temperature(
         for cdata in dataset:
             if cdata.pdb_id not in precomputed:
                 continue
-            nf, ef, adj = precomputed[cdata.pdb_id]
+            nf, ef, adj, ci = precomputed[cdata.pdb_id]
             N  = len(cdata.chain_ids)
             gt = cdata.gt_order
-            h  = model.embed(nf, adj, ef)
+            h  = model.embed(nf, adj, ef, ci)
             for step in range(1, N):
                 assembled = gt[:step]
                 correct   = gt[step]
@@ -1043,6 +1098,10 @@ def main():
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--patience", type=int, default=100,
                         help="Early stopping: halt if gt_prob doesn't improve for N epochs")
+    parser.add_argument("--anchor_mode", choices=["max", "pooled"], default="pooled",
+                        help="Anchor aggregation: pooled=context-gated (Step 11), max=original")
+    parser.add_argument("--sparse_k", type=int, default=0,
+                        help="Top-k neighbour pruning for sparse GATv2 (Step 12); 0=no pruning")
     args, _ = parser.parse_known_args()
 
     print(f"[gnn] device={DEVICE}")
@@ -1072,7 +1131,7 @@ def main():
     print(f"[gnn] train={len(train_dataset)} "
           f"(marsh={n_marsh}, expanded={n_expanded}, v2={n_v2}), eval={len(eval_dataset)}")
 
-    # Populate GO matrices (ProtFuncBridge logit cosine) — cached to data/go_cache/
+    # Populate GO matrices (FABLEBridge logit cosine) — cached to data/go_cache/
     # Runs on all training complexes; skips if model files unavailable
     parser2 = argparse.ArgumentParser(add_help=False)
     parser2.add_argument("--no_go", action="store_true",
@@ -1084,15 +1143,23 @@ def main():
         print(f"[go] done (cache: {GO_CACHE})")
 
     esm_dim  = marsh_dataset[0].esm_embeddings.shape[1]
-    node_dim = esm_dim + PLDDT_NODE_DIM + 1  # ESM + pLDDT (5d) + SASA diag (1d)
+    node_dim = esm_dim + PLDDT_NODE_DIM + 1 + GEOM_DIM  # ESM + pLDDT (5d) + SASA (1d) + geom (9d)
+    edge_dim = 5  # ppi + esm_cos + go_cos + sasa + contact_density
 
-    print(f"[gnn] node_dim={node_dim} (esm={esm_dim} + plddt={PLDDT_NODE_DIM} + sasa=1)")
+    print(f"[gnn] {MODEL_VERSION} node_dim={node_dim} "
+          f"(esm={esm_dim} + plddt={PLDDT_NODE_DIM} + sasa=1 + geom={GEOM_DIM}) "
+          f"edge_dim={edge_dim}")
 
-    # Precompute all tensors
+    GEOM_CACHE.mkdir(parents=True, exist_ok=True)
+
+    # Precompute all tensors (downloads AF PDBs for geom features on first run)
+    print("[gnn] precomputing features (may download AlphaFold PDBs on first run)…")
     precomputed = {cd.pdb_id: precompute(cd, esm_dim) for cd in train_dataset}
 
+    print(f"[gnn] anchor_mode={args.anchor_mode} sparse_k={args.sparse_k}")
     model = AssemblyScorer(
-        node_dim=node_dim, edge_dim=4, hidden=128, n_layers=3, heads=4, dropout=0.1
+        node_dim=node_dim, edge_dim=edge_dim, hidden=128, n_layers=3, heads=4, dropout=0.1,
+        anchor_mode=args.anchor_mode, sparse_k=args.sparse_k,
     ).to(DEVICE)
     print(f"[gnn] params={sum(p.numel() for p in model.parameters()):,}")
 
@@ -1157,13 +1224,17 @@ def main():
                 patience_ctr = 0
                 ckpt = {
                     "model_state_dict": model.state_dict(),
-                    "node_dim":  node_dim,
-                    "epoch":     epoch,
-                    "gt_prob":   gt_prob_val,
-                    "mean_tau":  mean_tau,
+                    "node_dim":    node_dim,
+                    "edge_dim":    edge_dim,
+                    "version":     MODEL_VERSION,
+                    "epoch":       epoch,
+                    "gt_prob":     gt_prob_val,
+                    "mean_tau":    mean_tau,
+                    "anchor_mode": args.anchor_mode,
+                    "sparse_k":    args.sparse_k,
                 }
                 torch.save(ckpt, GNN_DIR / "best_gnn.pt")
-                torch.save(ckpt, GNN_DIR / "best_v3.pt")
+                torch.save(ckpt, GNN_DIR / "best_v4.pt")
             else:
                 patience_ctr += EVAL_EVERY
 
@@ -1209,6 +1280,8 @@ def main():
     torch.save({
         "model_state_dict": model.state_dict(),
         "node_dim": node_dim,
+        "edge_dim": edge_dim,
+        "version":  MODEL_VERSION,
         "epoch": EPOCHS,
         "gt_prob": history["gt_prob"][-1],
         "mean_tau": history["mean_tau"][-1],

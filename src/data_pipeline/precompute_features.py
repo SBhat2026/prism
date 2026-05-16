@@ -245,7 +245,7 @@ def process_one(row: pd.Series, out_dir: Path) -> bool:
     ppi_mat = _fetch_ppi_matrix(effective_uids)
     np.save(str(cplx_dir / "ppi.npy"), ppi_mat)
 
-    # 7. GO matrix placeholder (zeros; filled by downstream ProtFuncBridge if desired)
+    # 7. GO matrix placeholder (zeros; filled by downstream FABLEBridge if desired)
     np.save(str(cplx_dir / "go.npy"), np.zeros((N, N), dtype=np.float32))
 
     # 8. meta.json

@@ -50,6 +50,8 @@ class ComplexData:
     plddt: Optional[np.ndarray] = None  # (N, 5) AlphaFold pLDDT node features
     gt_source: str = "experimental"     # "experimental" | "sasa_greedy"
     subcomplexes: Optional[list] = None  # known obligate subcomplex groups, e.g. [[0,1],[2,3]] for Hb
+    uniprot_ids: Optional[list] = None  # (N,) UniProt IDs per chain (empty str if unknown)
+    pdb_path: Optional[str] = None      # path to full-complex PDB (Marsh only)
 
 
 def _max_mean(values: list[float]) -> tuple[float, float]:

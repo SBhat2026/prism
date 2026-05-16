@@ -61,8 +61,8 @@ def get_dataset():
         from src.training.dataset import load_all_complex_data
         bridge = None
         try:
-            from src.protfunc_bridge.go_coherence import ProtFuncBridge
-            bridge = ProtFuncBridge()
+            from src.protfunc_bridge.go_coherence import FABLEBridge
+            bridge = FABLEBridge()
         except Exception:
             pass
         dataset = load_all_complex_data(

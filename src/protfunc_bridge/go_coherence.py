@@ -1,5 +1,5 @@
 """
-ProtFunc bridge: derives GO-MF functional coherence scores from existing ProtFunc model.
+FABLE bridge: derives GO-MF functional coherence scores from existing FABLE model.
 
 Uses unified_v1.pth (ImprovedResidualMLP, in_dim=331, hidden=2048, n_blocks=8, 8124 labels).
 Input: 320d ESM-2 8M embedding + 11 sequence-only features (computable from FASTA).
@@ -113,9 +113,9 @@ class ImprovedResidualMLP(nn.Module):
 
 # ── Bridge ───────────────────────────────────────────────────────────────────
 
-class ProtFuncBridge:
+class FABLEBridge:
     """
-    Wraps unified_v1.pth ProtFunc model for GO-MF probability inference.
+    Wraps unified_v1.pth FABLE model for GO-MF probability inference.
     Input: protein sequence → 8124-dim GO-MF probability vector.
     Caches ESM embeddings and GO predictions.
     """
@@ -186,7 +186,7 @@ class ProtFuncBridge:
             with open(THRESH_PATH) as f:
                 self._thresholds = json.load(f)
 
-        print(f"[ProtFuncBridge] loaded — {n_blocks} blocks, {out_dim} labels, device={self.device}")
+        print(f"[FABLEBridge] loaded — {n_blocks} blocks, {out_dim} labels, device={self.device}")
 
     @torch.no_grad()
     def get_embedding(self, sequence: str) -> np.ndarray:
@@ -258,7 +258,7 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
 def go_coherence_score(
     new_seq: str,
     complex_seqs: list[str],
-    bridge: "ProtFuncBridge",
+    bridge: "FABLEBridge",
     use_logits: bool = True,
 ) -> float:
     """
@@ -274,7 +274,7 @@ def go_coherence_score(
     return _cosine(new_p, complex_mean)
 
 
-def pairwise_go_matrix(sequences: list[str], bridge: "ProtFuncBridge",
+def pairwise_go_matrix(sequences: list[str], bridge: "FABLEBridge",
                        use_logits: bool = True) -> np.ndarray:
     """
     N×N pairwise GO cosine similarity. Uses logits by default.

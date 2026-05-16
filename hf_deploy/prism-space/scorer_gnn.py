@@ -38,7 +38,7 @@ class MultiHeadGAT(nn.Module):
 
 
 class AssemblyScorer(nn.Module):
-    def __init__(self, node_dim=646, edge_dim=4, hidden=128,
+    def __init__(self, node_dim=655, edge_dim=5, hidden=128,
                  n_layers=3, heads=4, dropout=0.1):
         super().__init__()
         self.node_proj = nn.Linear(node_dim, hidden)
@@ -70,7 +70,8 @@ class AssemblyScorer(nn.Module):
         return self.score_head(score_in).squeeze(-1)
 
 
-def build_edge_features(ppi, esm_cos, go_cos, sasa_norm):
+def build_edge_features(ppi, esm_cos, go_cos, sasa_norm, contact_density=None):
     N = ppi.shape[0]
-    ef = np.stack([ppi, esm_cos, go_cos, sasa_norm], axis=-1).astype(np.float32)
+    cd = contact_density if contact_density is not None else np.zeros((N, N), dtype=np.float32)
+    ef = np.stack([ppi, esm_cos, go_cos, sasa_norm, cd], axis=-1).astype(np.float32)
     return torch.tensor(ef, dtype=torch.float32)

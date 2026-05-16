@@ -87,7 +87,9 @@ def _load_bundle(key: str) -> ComplexBundle | None:
         return None
     try:
         meta    = json.loads((d / "meta.json").read_text())
-        emb     = np.load(d / "emb.npy")     # (N, 640)
+        # Load emb_v2.npy (652d with chirality) if available, else emb.npy (646d)
+        emb_v2_path = d / "emb_v2.npy"
+        emb     = np.load(str(emb_v2_path if emb_v2_path.exists() else d / "emb.npy"))
         sasa    = np.load(d / "sasa.npy")    # (N, N)
         plddt   = np.load(d / "plddt.npy")   # (N, 5)
         ppi     = np.load(d / "ppi.npy")     # (N, N)
@@ -382,7 +384,9 @@ def train(args):
 
     # Model
     model = AssemblyScorer(
-        node_dim=646, edge_dim=4, hidden=128, n_layers=3, heads=4, dropout=0.1
+        node_dim=args.node_dim, edge_dim=args.edge_dim,
+        hidden=128, n_layers=3, heads=4, dropout=0.1,
+        anchor_mode=args.anchor_mode, sparse_k=args.sparse_k,
     ).to(DEVICE)
     print(f"[model] {sum(p.numel() for p in model.parameters()):,} params on {DEVICE}")
 
@@ -470,7 +474,7 @@ def train(args):
                     "optimizer_state_dict": optimiser.state_dict(),
                     "best_gt_prob":       best_gt_prob,
                     "config": {
-                        "node_dim": 646, "edge_dim": 4,
+                        "node_dim": args.node_dim, "edge_dim": args.edge_dim,
                         "hidden": 128,   "n_layers": 3,
                         "heads": 4,      "dropout": 0.1,
                     },
@@ -559,6 +563,18 @@ def main():
     ap.add_argument("--resume",       action="store_true")
     ap.add_argument("--reset_splits", action="store_true",
                     help="Regenerate train/val/test split (ignores splits.json)")
+    # Architecture flags (Steps 9-12)
+    ap.add_argument("--use_quotient", action="store_true",
+                    help="Enable quotient graph compression for homomers")
+    ap.add_argument("--anchor_mode", choices=["max", "pooled"], default="pooled",
+                    help="Anchor aggregation mode: max (original) or pooled (context-gated)")
+    ap.add_argument("--sparse_k",    type=int,   default=0,
+                    help="Top-k sparse neighbour pruning (0 = disabled)")
+    # Feature dim flags (Step 13 — set to 652/5 after chirality cache regen)
+    ap.add_argument("--node_dim",    type=int,   default=652,
+                    help="Node feature dimension (646 pre-chirality, 652 post)")
+    ap.add_argument("--edge_dim",    type=int,   default=5,
+                    help="Edge feature dimension (4 pre-chirality, 5 post)")
     args = ap.parse_args()
     train(args)
 

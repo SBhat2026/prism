@@ -627,7 +627,7 @@ def plot_summary_figure(outpath: str):
         "",
         "4. NPC 3F3F (8-mer): 473/500 unique paths\n   — highly stochastic; step 3 is bottleneck.",
         "",
-        "5. ProtFunc model is out-of-distribution for\n   human proteins (insect-trained).",
+        "5. FABLE model is out-of-distribution for\n   human proteins (insect-trained).",
         "   GO term needs domain transfer to fully\n   test heteromer hypothesis.",
     ]
     ax4.text(0.02, 0.98, "\n".join(findings), va="top", ha="left",

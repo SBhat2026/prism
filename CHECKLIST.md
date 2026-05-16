@@ -22,7 +22,7 @@
 - ✅ **1c.** ESM-2 8M (320d) embeddings computed for all 71 Marsh2013 chain sequences
 - ✅ **1c+.** ESM-2 150M (640d) embeddings computed — critical finding: τ=1.000 for homomers vs 0.143 for 8M
 - ✅ **1d.** GROMACS SASA pipeline working; SASA cached in `data/sasa_cache/`
-- ✅ **1e.** ProtFuncBridge loading `unified_v1.pth` (330MB) correctly with `weights_only=False`
+- ✅ **1e.** FABLEBridge loading `unified_v1.pth` (330MB) correctly with `weights_only=False`
 
 ---
 
@@ -36,12 +36,12 @@
 
 ---
 
-## Phase 3 — ProtFunc GO Coherence Term
+## Phase 3 — FABLE GO Coherence Term
 
-- ✅ **3a.** ProtFuncBridge loads cleanly; switched to `get_logits()` (pre-sigmoid) for OOD robustness
+- ✅ **3a.** FABLEBridge loads cleanly; switched to `get_logits()` (pre-sigmoid) for OOD robustness
 - ✅ **3b.** GO coherence matrix computed (cosine on logits; range 0.976–1.000 for human proteins)
 - ✅ **3c.** GO-only ablation: τ=0.917 heteromers vs 0.833 ESM-only — supports hypothesis
-- ✅ **3d.** GO coherence edges ESM for heteromers; OOD limitation noted (ProtFunc trained on insects/mammals)
+- ✅ **3d.** GO coherence edges ESM for heteromers; OOD limitation noted (FABLE trained on insects/mammals)
 
 ---
 
@@ -120,7 +120,7 @@
 ## Integration Architecture Summary
 
 ```
-Sequence → ESM-2 (via ProtFuncBridge) → GO probs + 320d embedding
+Sequence → ESM-2 (via FABLEBridge) → GO probs + 320d embedding
 PDB → GROMACS gmx sasa → ΔSASA per pair
 UniProt IDs → STRING API → PPI scores
 ↓

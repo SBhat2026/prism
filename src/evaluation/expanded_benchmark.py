@@ -9,6 +9,7 @@ Usage:
     python src/evaluation/expanded_benchmark.py
     python src/evaluation/expanded_benchmark.py --no_v2     # Marsh only
     python src/evaluation/expanded_benchmark.py --no_marsh  # v2 only
+    python src/evaluation/expanded_benchmark.py --test_only data/pathlzerd_testset  # external testset
 """
 
 import sys
@@ -182,6 +183,53 @@ def load_v2_dataset() -> list[ComplexData]:
             gt_source="experimental",
         ))
     print(f"[data] loaded {len(dataset)} experimental_v2 complexes")
+    return dataset
+
+
+def load_test_only_dataset(test_dir: Path) -> list[ComplexData]:
+    """Load complexes from any directory with the same layout as experimental_complexes."""
+    index_path = test_dir / "index.json"
+    if not index_path.exists():
+        print(f"[data] no index.json in {test_dir}")
+        return []
+    index = json.loads(index_path.read_text())
+    dataset = []
+    for meta in index:
+        pdb_id   = meta["pdb_id"]
+        cplx_dir = test_dir / pdb_id
+        emb_path  = cplx_dir / "emb.npy"
+        sasa_path = cplx_dir / "sasa.npy"
+        if not (emb_path.exists() and sasa_path.exists()):
+            print(f"  [test] {pdb_id} missing files, skipping")
+            continue
+        chains = meta["chain_ids"]
+        N = len(chains)
+        emb_mat  = np.load(str(emb_path)).astype(np.float32)
+        sasa_mat = np.load(str(sasa_path)).astype(np.float32)
+        plddt    = np.load(str(cplx_dir / "plddt.npy")).astype(np.float32) \
+                   if (cplx_dir / "plddt.npy").exists() \
+                   else np.full((N, PLDDT_NODE_DIM), 70.0, dtype=np.float32)
+        ppi_mat  = np.load(str(cplx_dir / "ppi.npy")).astype(np.float32) \
+                   if (cplx_dir / "ppi.npy").exists() \
+                   else np.zeros((N, N), dtype=np.float32)
+        norms  = np.linalg.norm(emb_mat, axis=1, keepdims=True)
+        emb_n  = emb_mat / (norms + 1e-8)
+        esm_cos = (emb_n @ emb_n.T).clip(-1, 1).astype(np.float32)
+        dataset.append(ComplexData(
+            pdb_id=pdb_id,
+            complex_type=meta.get("complex_type", "unknown"),
+            chain_ids=chains,
+            sequences=meta.get("sequences", [""] * N),
+            gt_order=meta["gt_order"],
+            sasa_matrix=sasa_mat,
+            esm_matrix=esm_cos,
+            go_matrix=np.zeros((N, N), dtype=np.float32),
+            ppi_matrix=ppi_mat,
+            esm_embeddings=emb_mat,
+            plddt=plddt,
+            gt_source=meta.get("gt_source", "external"),
+        ))
+    print(f"[data] loaded {len(dataset)} complexes from {test_dir}")
     return dataset
 
 
@@ -378,6 +426,9 @@ def main():
     parser.add_argument("--no_marsh", action="store_true", help="Skip Marsh 2013")
     parser.add_argument("--ckpt",     default=str(CKPT_PATH), help="Checkpoint path")
     parser.add_argument("--no_go",    action="store_true", help="Skip GO matrix loading")
+    parser.add_argument("--test_only", default=None,
+                        help="Eval only on an external testset dir (index.json + per-complex .npy files). "
+                             "Skips Marsh and v2; saves metrics to results/<dirname>_metrics.json")
     args = parser.parse_args()
 
     ckpt_path = Path(args.ckpt)
@@ -402,7 +453,8 @@ def main():
     # Infer hidden from checkpoint (node_proj maps node_dim → hidden)
     hidden_dim = sd["node_proj.weight"].shape[0]
 
-    model = AssemblyScorer(node_dim=node_dim, edge_dim=4, hidden=hidden_dim).to(DEVICE)
+    edge_dim = state.get("edge_dim", 4) if isinstance(state, dict) and "model_state_dict" in state else 4
+    model = AssemblyScorer(node_dim=node_dim, edge_dim=edge_dim, hidden=hidden_dim).to(DEVICE)
     model.load_state_dict(sd)
     model.eval()
     print(f"[model] loaded {ckpt_path.name} (node_dim={node_dim}, hidden={hidden_dim}){meta_str}")
@@ -417,6 +469,49 @@ def main():
         except Exception:
             pass
 
+    # ── External test-only mode ──────────────────────────────────────────────
+    if args.test_only:
+        test_dir = Path(args.test_only)
+        test_data = load_test_only_dataset(test_dir)
+        test_rows = []
+        print(f"[eval] External testset: {test_dir.name}…")
+        for cd in test_data:
+            nf, ef, adj = precompute(cd)
+            # Pad node features if checkpoint expects more dims (v4 with geom)
+            if nf.shape[1] < node_dim:
+                pad = torch.zeros(nf.shape[0], node_dim - nf.shape[1], device=nf.device)
+                nf = torch.cat([nf, pad], dim=1)
+            # Pad edge features if checkpoint expects more dims (v4 with contact density)
+            if ef.shape[2] < edge_dim:
+                pad = torch.zeros(*ef.shape[:2], edge_dim - ef.shape[2], device=ef.device)
+                ef = torch.cat([ef, pad], dim=2)
+            m = evaluate_complex(model, cd, nf, ef, adj, device=DEVICE)
+            test_rows.append({
+                "pdb_id": cd.pdb_id,
+                "complex_type": cd.complex_type,
+                "source": test_dir.name,
+                "n_chains": len(cd.chain_ids),
+                "temperature": temperature,
+                **m,
+            })
+        if test_rows:
+            print_table(test_rows, f"External: {test_dir.name}")
+            print_size_stratified(test_rows)
+        summary = {
+            "mean_tau":        float(np.mean([r["tau"] for r in test_rows])) if test_rows else 0.0,
+            "mean_top1":       float(np.mean([r["top1_accuracy"] for r in test_rows])) if test_rows else 0.0,
+            "mean_confidence": float(np.mean([r["mean_confidence"] for r in test_rows])) if test_rows else 0.0,
+            "mean_early_tau":  float(np.mean([r["early_step_tau"] for r in test_rows])) if test_rows else 0.0,
+            "n": len(test_rows),
+        }
+        out_json = ROOT / "results" / f"{test_dir.name}_metrics.json"
+        out_json.write_text(json.dumps({"rows": test_rows, "summary": summary}, indent=2))
+        print(f"[saved] {out_json}")
+        print(f"\n[summary] τ={summary['mean_tau']:.4f}  top1={summary['mean_top1']:.4f}  "
+              f"conf={summary['mean_confidence']:.4f}  early_τ={summary['mean_early_tau']:.4f}  "
+              f"n={summary['n']}")
+        return
+
     marsh_rows, v2_rows = [], []
 
     if not args.no_marsh:
@@ -427,6 +522,10 @@ def main():
         print("[eval] Marsh 2013...")
         for cd in marsh_data:
             nf, ef, adj = precompute(cd)
+            if nf.shape[1] < node_dim:
+                nf = torch.cat([nf, torch.zeros(nf.shape[0], node_dim - nf.shape[1])], dim=1)
+            if ef.shape[2] < edge_dim:
+                ef = torch.cat([ef, torch.zeros(*ef.shape[:2], edge_dim - ef.shape[2])], dim=2)
             m = evaluate_complex(model, cd, nf, ef, adj, device=DEVICE)
             marsh_rows.append({
                 "pdb_id": cd.pdb_id,
@@ -445,6 +544,10 @@ def main():
         print("[eval] Experimental GT v2...")
         for cd in v2_data:
             nf, ef, adj = precompute(cd)
+            if nf.shape[1] < node_dim:
+                nf = torch.cat([nf, torch.zeros(nf.shape[0], node_dim - nf.shape[1])], dim=1)
+            if ef.shape[2] < edge_dim:
+                ef = torch.cat([ef, torch.zeros(*ef.shape[:2], edge_dim - ef.shape[2])], dim=2)
             m = evaluate_complex(model, cd, nf, ef, adj, device=DEVICE)
             v2_rows.append({
                 "pdb_id": cd.pdb_id,
