@@ -765,6 +765,13 @@ def _build_tensors(emb_mat, plddt_f, bsa_mat):
 fastapi_app = FastAPI(title="PRISM API")
 fastapi_app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+from fastapi.responses import JSONResponse
+from fastapi import Request as FastAPIRequest
+
+@fastapi_app.exception_handler(Exception)
+async def _generic_exception_handler(request: FastAPIRequest, exc: Exception):
+    return JSONResponse(status_code=500, content={"detail": f"Internal error: {type(exc).__name__}: {exc}"})
+
 
 @fastapi_app.post("/api/mutate")
 def mutate_api(req: MutateRequest):
@@ -808,16 +815,26 @@ def mutate_api(req: MutateRequest):
     plddt_f = fetch_plddt_for_chains(pdb_id, chain_ids)
     plddt_f[:, 0] /= 100.0; plddt_f[:, 3] /= 100.0; plddt_f[:, 4] /= 100.0
 
-    model = _load_model()
+    try:
+        model = _load_model()
+    except Exception as e:
+        raise HTTPException(500, f"Model loading failed: {e}")
 
-    wt_emb  = embed_sequences({f"c{i}": s for i, s in enumerate(sequences)})
+    try:
+        wt_emb = embed_sequences({f"c{i}": s for i, s in enumerate(sequences)})
+    except Exception as e:
+        raise HTTPException(500, f"ESM embedding failed: {e}")
+
     wt_mat  = np.stack([wt_emb[f"c{i}"] for i in range(N)])
     wt_nf, wt_ef, wt_adj = _build_tensors(wt_mat, plddt_f, bsa_mat)
     wt_order, wt_steps   = _run_assembly(model, wt_nf, wt_ef, wt_adj, N, is_homomer)
 
     mut_seqs = sequences[:]
     mut_seqs[chain_idx] = orig_seq[:pos-1] + req.mutant_aa.upper() + orig_seq[pos:]
-    mut_emb_single = embed_sequences({f"c{chain_idx}": mut_seqs[chain_idx]})
+    try:
+        mut_emb_single = embed_sequences({f"c{chain_idx}": mut_seqs[chain_idx]})
+    except Exception as e:
+        raise HTTPException(500, f"ESM embedding (mutant) failed: {e}")
     mut_mat = wt_mat.copy()
     mut_mat[chain_idx] = mut_emb_single[f"c{chain_idx}"]
     mut_nf, mut_ef, mut_adj = _build_tensors(mut_mat, plddt_f, bsa_mat)
