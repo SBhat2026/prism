@@ -347,6 +347,76 @@ def load_experimental_v2_dataset() -> list[ComplexData]:
     return dataset
 
 
+def load_labeled_15k_dataset(split: str = "train", max_complexes: int = 0) -> list[ComplexData]:
+    """Load labeled_15k complexes from data/labeled_15k/{pdb_id}/."""
+    cplx_dir = ROOT / "data" / "labeled_15k"
+    if not cplx_dir.exists():
+        print("[data] data/labeled_15k/ not found")
+        return []
+
+    all_dirs = sorted([d for d in cplx_dir.iterdir() if d.is_dir()])
+    if max_complexes > 0:
+        all_dirs = all_dirs[:max_complexes]
+
+    dataset = []
+    skipped = 0
+    for d in all_dirs:
+        meta_path = d / "meta.json"
+        emb_path  = d / "emb.npy"
+        sasa_path = d / "sasa.npy"
+        if not (meta_path.exists() and emb_path.exists() and sasa_path.exists()):
+            skipped += 1; continue
+        try:
+            meta    = json.loads(meta_path.read_text())
+            pdb_id  = meta["pdb_id"]
+            chains  = meta["chain_ids"]
+            N       = len(chains)
+            emb_mat = np.load(str(emb_path)).astype(np.float32)
+            sasa_mat= np.load(str(sasa_path)).astype(np.float32)
+            if emb_mat.shape[0] != N or sasa_mat.shape != (N, N):
+                skipped += 1; continue
+            plddt   = np.load(str(d / "plddt.npy")).astype(np.float32) \
+                      if (d / "plddt.npy").exists() \
+                      else np.full((N, PLDDT_NODE_DIM), 70.0, dtype=np.float32)
+            ppi_raw = np.load(str(d / "ppi.npy")).astype(np.float32) \
+                      if (d / "ppi.npy").exists() else np.zeros((N, N), dtype=np.float32)
+            ppi_mat = ppi_raw if ppi_raw.shape == (N, N) else np.zeros((N, N), dtype=np.float32)
+            go_raw  = np.load(str(d / "go.npy")).astype(np.float32) \
+                      if (d / "go.npy").exists() else np.zeros((N, N), dtype=np.float32)
+            go_mat  = go_raw if go_raw.shape == (N, N) else np.zeros((N, N), dtype=np.float32)
+            norms   = np.linalg.norm(emb_mat, axis=1, keepdims=True)
+            esm_cos = (emb_mat / (norms + 1e-8) @ (emb_mat / (norms + 1e-8)).T).clip(-1,1).astype(np.float32)
+            pdb_cache = ROOT / "data" / "cache" / "pdb" / f"{pdb_id}.pdb"
+            dataset.append(ComplexData(
+                pdb_id=pdb_id,
+                complex_type=meta.get("complex_type", "heteromer"),
+                chain_ids=chains,
+                sequences=meta.get("sequences", [""] * N),
+                gt_order=meta.get("gt_order", list(range(N))),
+                sasa_matrix=sasa_mat,
+                esm_matrix=esm_cos,
+                go_matrix=go_mat,
+                ppi_matrix=ppi_mat,
+                esm_embeddings=emb_mat,
+                plddt=plddt,
+                gt_source=meta.get("source", "sasa_greedy"),
+                uniprot_ids=meta.get("uniprot_ids", []),
+                pdb_path=str(pdb_cache) if pdb_cache.exists() else None,
+            ))
+        except Exception:
+            skipped += 1
+
+    # Deduplicate by pdb_id
+    seen, deduped = set(), []
+    for c in dataset:
+        if c.pdb_id not in seen:
+            seen.add(c.pdb_id); deduped.append(c)
+    dataset = deduped
+
+    print(f"[data] loaded {len(dataset)} labeled_15k '{split}' complexes (skipped {skipped} missing)")
+    return dataset
+
+
 # ── GNN step-group scorer ────────────────────────────────────────────────────
 
 def score_step_gnn(
@@ -396,13 +466,18 @@ def greedy_gnn(model: AssemblyScorer, cdata: ComplexData,
 
 # ── Build all precomputed tensors ────────────────────────────────────────────
 
-def precompute(cdata: ComplexData, esm_dim: int = 320):
+def precompute(cdata: ComplexData, esm_dim: int = 320, include_chiral: bool = False):
     """
     Returns (node_feats, edge_feats, adj, copy_indices) for one complex.
 
     Node features: ESM (640d) + pLDDT (5d) + SASA_diag (1d) + geom (9d) = 655d
     Edge features: [ppi, esm_cos, go_cos, sasa_norm, contact_density] = 5d
     copy_indices: (N,) long — 0-indexed copy count per unique UniProt (Step 10)
+
+    include_chiral=True appends the Lever-1 handedness descriptors:
+      Node +3d [tetra_chirality, helical_sense, frame_handedness] → 658d
+      Edge +1d [interface handedness det(û_ij, v_i, v_j)]          → 6d
+    Off by default so v4/v5/v6 checkpoints keep loading unchanged.
     """
     N    = len(cdata.chain_ids)
     sasa = cdata.sasa_matrix / (cdata.sasa_matrix.max() + 1e-8)
@@ -426,12 +501,23 @@ def precompute(cdata: ComplexData, esm_dim: int = 320):
     sequences      = cdata.sequences or ["M" * 100] * N
     geom_feats     = build_geom_matrix(uniprot_ids, geom_cache_dir, sequences)  # (N, 9)
 
-    node_feats = np.hstack([
+    node_parts = [
         cdata.esm_embeddings.astype(np.float32),  # (N, esm_dim)
         plddt_feats,                               # (N, 5)
         sasa_diag.reshape(-1, 1),                  # (N, 1)
         geom_feats,                                # (N, 9)
-    ])
+    ]
+
+    # CHIRALITY-SENSITIVE FEATURES (Lever 1 interim) — opt-in, appended last.
+    chiral_edge = None
+    if include_chiral:
+        from src.features.chiral_descriptors import compute_chiral_features
+        chiral_node, chiral_edge = compute_chiral_features(
+            cdata.pdb_id, cdata.chain_ids, cdata.pdb_path
+        )
+        node_parts.append(chiral_node)             # (N, 3)
+
+    node_feats = np.hstack(node_parts)
     node_feats_t = torch.tensor(node_feats, dtype=torch.float32)
 
     # Voronoi contact density (only available when full-complex PDB is present)
@@ -445,9 +531,16 @@ def precompute(cdata: ComplexData, esm_dim: int = 320):
         except Exception:
             contact_density = None
 
+    # Always include contact_density slot even when None, so edge_dim=5 is consistent
+    contact_slot = contact_density if contact_density is not None \
+                   else np.zeros((N, N), dtype=np.float32)
     edge_feats_t = build_edge_features(
-        cdata.ppi_matrix, cdata.esm_matrix, cdata.go_matrix, sasa, contact_density
+        cdata.ppi_matrix, cdata.esm_matrix, cdata.go_matrix, sasa, contact_slot
     )
+    if chiral_edge is not None:
+        edge_feats_t = torch.cat(
+            [edge_feats_t, torch.tensor(chiral_edge, dtype=torch.float32)], dim=-1
+        )
     adj_dense = torch.ones(N, N, dtype=torch.bool)
 
     # Copy-index embedding for symmetry breaking (Step 10)
@@ -539,12 +632,13 @@ def _order_loss_from_h(
 ) -> torch.Tensor:
     """Cross-entropy loss for one assembly order, given precomputed node embeddings h.
     Runs embed once per complex (not per candidate) for a ~5-10x speedup."""
+    n_supervised = len(order)
     step_losses = []
-    for step in range(1, N):
+    for step in range(1, n_supervised):
         assembled = order[:step]
         correct   = order[step]
         remaining = [i for i in range(N) if i not in assembled]
-        if not remaining:
+        if not remaining or correct not in remaining:
             continue
         assembled_mask = torch.zeros(N, dtype=torch.bool, device=DEVICE)
         assembled_mask[assembled] = True
@@ -684,15 +778,16 @@ def eval_gt_prob(model, dataset, precomputed) -> float:
     probs = []
     with torch.no_grad():
         for cdata in dataset:
-            N     = len(cdata.chain_ids)
-            order = cdata.gt_order
+            N            = len(cdata.chain_ids)
+            order        = cdata.gt_order
+            n_supervised = len(order)
             node_feats, edge_feats, adj, copy_indices = precomputed[cdata.pdb_id]
             h = model.embed(node_feats, adj, edge_feats, copy_indices)
-            for step in range(1, N):
+            for step in range(1, n_supervised):
                 assembled = order[:step]
                 correct   = order[step]
                 remaining = [i for i in range(N) if i not in assembled]
-                if len(remaining) < 1:
+                if not remaining or correct not in remaining:
                     continue
                 assembled_mask = torch.zeros(N, dtype=torch.bool, device=DEVICE)
                 assembled_mask[assembled] = True
@@ -1049,10 +1144,11 @@ def calibrate_temperature(
             if cdata.pdb_id not in precomputed:
                 continue
             nf, ef, adj, ci = precomputed[cdata.pdb_id]
-            N  = len(cdata.chain_ids)
-            gt = cdata.gt_order
+            N            = len(cdata.chain_ids)
+            gt           = cdata.gt_order
+            n_supervised = len(gt)
             h  = model.embed(nf, adj, ef, ci)
-            for step in range(1, N):
+            for step in range(1, n_supervised):
                 assembled = gt[:step]
                 correct   = gt[step]
                 remaining = [i for i in range(N) if i not in assembled]
@@ -1095,6 +1191,10 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--use_experimental_v2", action="store_true")
+    parser.add_argument("--use_labeled_15k", action="store_true",
+                        help="Add labeled_15k complexes to training set")
+    parser.add_argument("--labeled_15k_max", type=int, default=0,
+                        help="Max labeled_15k complexes to load (0=all)")
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--patience", type=int, default=100,
                         help="Early stopping: halt if gt_prob doesn't improve for N epochs")
@@ -1120,16 +1220,24 @@ def main():
     if v2_dataset:
         print(f"[gnn] using experimental_v2: {len(v2_dataset)} complexes added to train+eval")
 
-    # Full training set: Marsh 2013 + expanded + (optional) experimental v2
+    # Optional: labeled_15k large corpus
+    labeled_15k_dataset = []
+    if args.use_labeled_15k:
+        labeled_15k_dataset = load_labeled_15k_dataset("train", args.labeled_15k_max)
+        print(f"[gnn] labeled_15k: {len(labeled_15k_dataset)} unique complexes after dedup")
+
+    # Full training set: Marsh 2013 + expanded + (optional) experimental v2 + (optional) labeled_15k
     # Eval (τ) uses Marsh 2013 + (optional) experimental v2 (both have experimental GT)
-    train_dataset = marsh_dataset + expanded_dataset + v2_dataset
+    train_dataset = marsh_dataset + expanded_dataset + v2_dataset + labeled_15k_dataset
     eval_dataset  = marsh_dataset + v2_dataset
 
     n_marsh    = len(marsh_dataset)
     n_expanded = len(expanded_dataset)
     n_v2       = len(v2_dataset)
+    n_15k      = len(labeled_15k_dataset)
     print(f"[gnn] train={len(train_dataset)} "
-          f"(marsh={n_marsh}, expanded={n_expanded}, v2={n_v2}), eval={len(eval_dataset)}")
+          f"(marsh={n_marsh}, expanded={n_expanded}, v2={n_v2}, labeled_15k={n_15k}), "
+          f"eval={len(eval_dataset)}")
 
     # Populate GO matrices (FABLEBridge logit cosine) — cached to data/go_cache/
     # Runs on all training complexes; skips if model files unavailable
