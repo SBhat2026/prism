@@ -540,6 +540,25 @@
       transition: width 0.4s ease;
     }
 
+    /* "no data" — a channel with nothing behind it for this complex. Hatched so
+       it can never be mistaken for a real mid-range bar, which is exactly what
+       the old hardcoded 0.5 looked like. */
+    .score-bar-nodata, .mini-bar-nodata {
+      height: 100%;
+      width: 100%;
+      border-radius: 3px;
+      background: repeating-linear-gradient(
+        45deg, transparent, transparent 3px,
+        var(--border, #30363d) 3px, var(--border, #30363d) 6px);
+      opacity: 0.85;
+    }
+    .score-row-nodata .score-label,
+    .score-row-nodata .score-val {
+      color: var(--text-muted, #8b949e);
+      font-style: italic;
+    }
+    .score-row-nodata .score-val { width: auto; }
+
     .score-val {
       width: 38px;
       font-size: 11px;
@@ -1812,6 +1831,9 @@ function renderInfoPanel(sim, step, assembledSet, stepIdx) {
   const sub = sim.subunits[chosen.idx];
   const scores = chosen.scores;
   const weighted = chosen.weighted;
+  // Older cached payloads carry no `available` block; absent means "assume
+  // present", so this stays backwards compatible with stored simulations.
+  const avail = chosen.available || {};
   const rejected = step.candidates.filter(c => c.idx !== chosen.idx);
   const runnerUp = rejected[0];
 
@@ -1838,10 +1860,10 @@ function renderInfoPanel(sim, step, assembledSet, stepIdx) {
     <!-- Score breakdown -->
     <div class="info-section">
       <h3>Score breakdown — ${sub.name}</h3>
-      ${scoreBar('SASA', scores.sasa, weighted.sasa, '#58a6ff')}
-      ${scoreBar('ESM', scores.esm, weighted.esm, '#3fb950')}
-      ${scoreBar('GO', scores.go, weighted.go, '#bc8cff')}
-      ${scoreBar('PPI', scores.ppi, weighted.ppi, '#f0883e')}
+      ${scoreBar('SASA', scores.sasa, weighted.sasa, '#58a6ff', avail.sasa)}
+      ${scoreBar('ESM', scores.esm, weighted.esm, '#3fb950', avail.esm)}
+      ${scoreBar('GO', scores.go, weighted.go, '#bc8cff', avail.go)}
+      ${scoreBar('PPI', scores.ppi, weighted.ppi, '#f0883e', avail.ppi)}
       <div class="score-row" style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
         <span class="score-label" style="color:var(--text)">Total</span>
         <div class="score-bar-track">
@@ -1892,10 +1914,10 @@ function renderInfoPanel(sim, step, assembledSet, stepIdx) {
                 </div>
                 <span style="font-family:monospace;margin-left:4px">${c.scores.combined.toFixed(3)}</span>
               </td>
-              <td>${miniBar(c.scores.sasa, '#58a6ff')}</td>
-              <td>${miniBar(c.scores.esm, '#3fb950')}</td>
-              <td>${miniBar(c.scores.go, '#bc8cff')}</td>
-              <td>${miniBar(c.scores.ppi, '#f0883e')}</td>
+              <td>${miniBar(c.scores.sasa, '#58a6ff', (c.available||{}).sasa)}</td>
+              <td>${miniBar(c.scores.esm, '#3fb950', (c.available||{}).esm)}</td>
+              <td>${miniBar(c.scores.go, '#bc8cff', (c.available||{}).go)}</td>
+              <td>${miniBar(c.scores.ppi, '#f0883e', (c.available||{}).ppi)}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -2048,22 +2070,48 @@ function goTermsSection(candidate) {
   return html;
 }
 
-function scoreBar(label, raw, weighted, color) {
+// available===false means nothing real stood behind this channel for this
+// complex. It used to be reported as a flat 0.5, which drew a half-full bar and
+// read as a genuine mid-range score — the reason several complexes looked like
+// "only SASA moves, everything else sits at 0.5". Draw it as an explicit gap.
+function scoreBar(label, raw, weighted, color, available) {
+  if (available === false) {
+    return `
+    <div class="score-row score-row-nodata">
+      <span class="score-label">${label}</span>
+      <div class="score-bar-track"><div class="score-bar-nodata"></div></div>
+      <span class="score-val" title="No data behind this channel for this complex — not a score of 0.5">no data</span>
+    </div>
+  `;
+  }
+  const w = Math.max(0, Math.min(1, raw));
   return `
     <div class="score-row">
       <span class="score-label">${label}</span>
       <div class="score-bar-track">
-        <div class="score-bar-fill" style="width:${(raw * 100).toFixed(1)}%;background:${color}"></div>
+        <div class="score-bar-fill" style="width:${(w * 100).toFixed(1)}%;background:${color}"></div>
       </div>
-      <span class="score-val">${raw.toFixed(3)} <span style="color:var(--text-muted);font-size:10px">(×w=${weighted.toFixed(3)})</span></span>
+      <span class="score-val">${raw.toFixed(3)} <span style="color:var(--text-muted);font-size:10px">(${weightLabel()}=${weighted.toFixed(3)})</span></span>
     </div>
   `;
 }
 
-function miniBar(val, color) {
+// The figure beside each bar means different things per scorer: a fixed linear
+// weight for the heuristic, occlusion attribution for the GNN. Labelling both
+// "×w" is how "the GNN weights GO at 0.5" became believable.
+function weightLabel() {
+  const sim = (typeof state !== 'undefined' && state && state.simulation) ? state.simulation : null;
+  return (sim && sim.scorer === 'gnn') ? 'attr' : '×w';
+}
+
+function miniBar(val, color, available) {
+  if (available === false) {
+    return `<div class="mini-bar-track"><div class="mini-bar-nodata"></div></div>`;
+  }
+  const w = Math.max(0, Math.min(1, val));
   return `
     <div class="mini-bar-track">
-      <div class="mini-bar-fill" style="width:${(val * 100).toFixed(1)}%;background:${color}"></div>
+      <div class="mini-bar-fill" style="width:${(w * 100).toFixed(1)}%;background:${color}"></div>
     </div>
   `;
 }

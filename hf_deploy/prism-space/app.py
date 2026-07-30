@@ -32,6 +32,20 @@ from src.models.scorer_gnn import (
     AssemblyScorer, build_edge_features as gnn_build_edge, build_copy_indices,
 )
 from src.features.chirality_features import compute_chirality_features
+from src.features.channel_health import channel_stats
+from src.models.attribution import edge_channel_attribution, normalise_attribution
+
+# Edge channel order produced by build_edge_features():
+# [ppi, esm_cos, go_cos, sasa_norm, (handedness)]. The UI labels drop the _cos.
+GNN_EDGE_CHANNELS = {"ppi": 0, "esm": 1, "go": 2, "sasa": 3}
+
+
+def _edge_channel_health(edge_feats):
+    """Classify each edge channel for this complex (ok / saturated / dead)."""
+    e = edge_feats.detach().cpu().numpy()
+    mats = {name: (e[:, :, ch] if ch < e.shape[-1] else None)
+            for name, ch in GNN_EDGE_CHANNELS.items()}
+    return channel_stats(mats, reference="sasa")
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -524,6 +538,34 @@ def _combined_score(sasa: float, esm: float, go: float, ppi: float) -> float:
     return W_SASA * sasa + W_ESM * esm + W_GO * go + W_PPI * ppi
 
 
+# ── Channel availability ──────────────────────────────────────────────────────
+# The scorers above fall back to 0.5 whenever their input is missing: no
+# embeddings, no GO annotations, no STRING coverage, or simply nothing assembled
+# yet. 0.5 is a defensible neutral for *ranking* — it is constant across
+# candidates so it cancels in the argmax — but the viewer drew it as a real bar,
+# so a channel with no data behind it looked like a confident mid-range score.
+# That is why several complexes appeared to move only SASA: SASA is the one
+# channel derivable from structure alone, so it is the only one that never
+# falls back.
+#
+# These predicates say whether a channel had anything real behind it, so the UI
+# can draw "no data" instead.
+
+def _channel_availability(idx: int, subunits: list, embs: list, go_data: list,
+                          assembled_indices: list) -> dict:
+    if not assembled_indices:
+        # Nothing placed yet: the pairwise channels have no context to score
+        # against, so none of them mean anything at step 0.
+        return {"sasa": True, "esm": False, "go": False, "ppi": False}
+    return {
+        "sasa": True,
+        "esm":  bool(embs),
+        "go":   bool(go_data[idx]["all"]) and any(go_data[j]["all"] for j in assembled_indices),
+        "ppi":  bool(subunits[idx].get("uniprot"))
+                and any(subunits[j].get("uniprot") for j in assembled_indices),
+    }
+
+
 # ── Circular τ ────────────────────────────────────────────────────────────────
 
 def _kendall_tau(pred: list[int], gt: list[int]) -> float:
@@ -612,6 +654,8 @@ def _simulate(
         # GNN path: score all candidates at once, extract attention
         gnn_scores  = None
         attn_matrix = None
+        gnn_attr    = None
+        gnn_health  = None
         if use_gnn:
             assembled_mask = torch.zeros(N, dtype=torch.bool)
             if assembled_indices:
@@ -623,6 +667,22 @@ def _simulate(
                 )
             # Map candidate index → GNN logit
             gnn_scores = {idx: float(gnn_logits[i].item()) for i, idx in enumerate(remaining)}
+
+            # Per-channel attribution for the GNN. The linear weights below
+            # (W_SASA·sasa etc.) describe the *heuristic* scorer; reporting them
+            # next to a GNN logit claims to explain a score they did not
+            # produce. Occlusion attribution is the honest analogue: neutralise
+            # each edge channel and measure how far the GNN's own score moves.
+            try:
+                gnn_attr = normalise_attribution(edge_channel_attribution(
+                    gnn_model, node_feats_t, edge_feats_t, adj_t,
+                    assembled_mask, remaining, GNN_EDGE_CHANNELS,
+                    copy_indices=copy_indices_t,
+                ))
+            except Exception as e:
+                print(f"[attr] attribution failed for {pdb_id} step {step}: {e}")
+                gnn_attr = None
+            gnn_health = _edge_channel_health(edge_feats_t)
 
         sasa_mat = _state["sasa_matrices"].get(pdb_id)
 
@@ -646,6 +706,25 @@ def _simulate(
             else:
                 raw_score = _combined_score(sasa, esm, go, ppi)
 
+            avail = _channel_availability(idx, subunits, embs, go_data,
+                                          assembled_indices)
+            if gnn_scores is not None:
+                # GNN: `weighted` is occlusion attribution, and availability is
+                # governed by whether the edge channel carries signal at all.
+                li = remaining.index(idx)
+                weighted = ({k: round(float(gnn_attr[k][li]), 4) for k in GNN_EDGE_CHANNELS}
+                            if gnn_attr else {k: 0.0 for k in GNN_EDGE_CHANNELS})
+                if gnn_health:
+                    for k in GNN_EDGE_CHANNELS:
+                        avail[k] = avail.get(k, True) and gnn_health[k].usable
+            else:
+                weighted = {
+                    "sasa": round(W_SASA * sasa, 4),
+                    "esm":  round(W_ESM * esm, 4),
+                    "go":   round(W_GO * go, 4),
+                    "ppi":  round(W_PPI * ppi, 4),
+                }
+
             candidates.append({
                 "idx": idx,
                 "chain": sub["chain"],
@@ -663,12 +742,8 @@ def _simulate(
                     "ppi": round(ppi, 4),
                     "combined": round(raw_score, 4),
                 },
-                "weighted": {
-                    "sasa": round(W_SASA * sasa, 4),
-                    "esm": round(W_ESM * esm, 4),
-                    "go": round(W_GO * go, 4),
-                    "ppi": round(W_PPI * ppi, 4),
-                },
+                "weighted": weighted,
+                "available": avail,
                 "seq_len":            len(sub["sequence"]),
                 "go_terms":           [t["term"] for t in go_data[idx]["all"][:8]],
                 "go_terms_known":     [t["term"] for t in go_data[idx]["known"][:8]],

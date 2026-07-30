@@ -1,0 +1,3002 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PRISM — Protein Assembly Viewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/home.css">
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #f5f7fa;
+      --surface:      #ffffff;
+      --surface2:     #f0f2f6;
+      --surface3:     #e8ebf2;
+      --border:       #e2e5ec;
+      --border-focus: rgba(99,102,241,0.4);
+      --text:         #111827;
+      --text-muted:   #6b7280;
+      --text-dim:     #9ca3af;
+      --accent:       #6366f1;
+      --accent-2:     #8b5cf6;
+      --accent-light: rgba(99,102,241,0.08);
+      --green:        #16a34a;
+      --green-light:  rgba(22,163,74,0.1);
+      --orange:       #ea7522;
+      --red:          #dc2626;
+      --yellow:       #ca8a04;
+      --cyan:         #0891b2;
+      --sasa-color:   #6366f1;
+      --esm-color:    #16a34a;
+      --go-color:     #8b5cf6;
+      --ppi-color:    #ea7522;
+      --sidebar-w:    228px;
+      --radius:       10px;
+      --radius-sm:    7px;
+      --shadow-sm:    0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+      --shadow:       0 4px 12px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.05);
+      --transition:   0.15s cubic-bezier(0.4,0,0.2,1);
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────────────────────────── */
+    #sidebar {
+      width: var(--sidebar-w);
+      min-width: var(--sidebar-w);
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: width var(--transition), min-width var(--transition);
+    }
+    #sidebar.collapsed { width: 0; min-width: 0; border-right: none; }
+
+    #sidebar-header {
+      padding: 16px 14px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    #sidebar-header h1 {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.4px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    #sidebar-header p {
+      font-size: 10.5px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    #sidebar-score-bar {
+      display: flex;
+      height: 3px;
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 10px;
+      gap: 1px;
+    }
+    #sidebar-score-bar .sb-sasa { width: 40%; background: var(--sasa-color); }
+    #sidebar-score-bar .sb-esm  { width: 35%; background: var(--esm-color); }
+    #sidebar-score-bar .sb-go   { width: 15%; background: var(--go-color); }
+    #sidebar-score-bar .sb-ppi  { width: 10%; background: var(--ppi-color); }
+
+    #sidebar-score-labels { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+    .sb-label { font-size: 9.5px; color: var(--text-muted); display: flex; align-items: center; gap: 3px; font-weight: 500; }
+    .sb-label-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+
+    #status-bar {
+      padding: 6px 14px;
+      font-size: 10.5px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    #status-bar span { color: var(--accent); font-weight: 600; }
+
+    #complex-list { overflow-y: auto; flex: 1; }
+    #complex-list::-webkit-scrollbar { width: 4px; }
+    #complex-list::-webkit-scrollbar-track { background: transparent; }
+    #complex-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .complex-card {
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background var(--transition);
+      position: relative;
+    }
+    .complex-card:hover { background: var(--surface2); }
+    .complex-card.active {
+      background: var(--accent-light);
+      border-left: 2.5px solid var(--accent);
+    }
+
+    .card-pdb {
+      font-size: 10px;
+      color: var(--accent);
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    .card-name { font-size: 12px; font-weight: 600; color: var(--text); }
+    .card-desc { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; line-height: 1.45; }
+    .card-metric { font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+    .card-metric span { color: var(--green); font-weight: 700; }
+
+    .card-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 600;
+      padding: 1px 7px;
+      border-radius: 20px;
+      margin-top: 4px;
+      letter-spacing: 0.2px;
+    }
+    .badge-ring   { background: #ede9fe; color: #6d28d9; border: 1px solid #ddd6fe; }
+    .badge-homo   { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+    .badge-hetero { background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; }
+
+    .card-loading {
+      position: absolute;
+      top: 10px; right: 10px;
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--yellow);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    /* PDB input */
+    #pdb-input-wrap {
+      display: flex;
+      gap: 6px;
+      padding: 10px 14px 6px;
+    }
+    #pdb-input {
+      flex: 1;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 6px 10px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface2);
+      color: var(--text);
+      outline: none;
+      transition: border-color var(--transition), box-shadow var(--transition);
+    }
+    #pdb-input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.08);
+      background: var(--surface);
+    }
+    #pdb-load-btn {
+      padding: 6px 12px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background var(--transition);
+      white-space: nowrap;
+    }
+    #pdb-load-btn:hover { background: var(--accent-2); }
+    #pdb-load-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #pdb-load-status {
+      min-height: 18px;
+      padding: 0 14px 6px;
+      font-size: 10.5px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Sidebar examples */
+    #sidebar-examples {
+      padding: 8px 14px 10px;
+      border-top: 1px solid var(--border);
+    }
+    .examples-label {
+      font-size: 9.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-dim);
+      margin-bottom: 7px;
+    }
+    #example-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .example-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 9px;
+      border-radius: 20px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      font-size: 10.5px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background var(--transition), border-color var(--transition), color var(--transition);
+      white-space: nowrap;
+    }
+    .example-chip:hover {
+      background: var(--accent-light);
+      border-color: rgba(99,102,241,0.3);
+      color: var(--accent);
+    }
+    .example-chip.active {
+      background: var(--accent-light);
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .example-chip .chip-n {
+      font-size: 9px;
+      opacity: 0.6;
+    }
+
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.35;transform:scale(.8)} }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    @keyframes fadeUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+
+    @keyframes goldPulse {
+      0%,100% { box-shadow: 0 0 0 0 transparent; }
+      50%      { box-shadow: 0 0 20px rgba(202,138,4,0.15), inset 0 0 20px rgba(202,138,4,0.05); }
+    }
+
+    #graph-panel.tau-perfect { animation: goldPulse 2.8s ease-in-out infinite; }
+
+    /* ── Main ────────────────────────────────────────────────────────────────── */
+    #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+    #main-content { flex: 1; display: flex; overflow: hidden; }
+
+    /* ── Tab bar ─────────────────────────────────────────────────────────────── */
+    #main-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      padding: 0 20px;
+      align-items: center;
+    }
+
+    .main-tab {
+      padding: 11px 16px 10px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      position: relative;
+      user-select: none;
+      transition: color var(--transition);
+    }
+    .main-tab::after {
+      content: '';
+      position: absolute;
+      bottom: -1px; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      border-radius: 2px 2px 0 0;
+      transform: scaleX(0);
+      transition: transform var(--transition);
+    }
+    .main-tab:hover { color: var(--text); }
+    .main-tab.active { color: var(--accent); font-weight: 600; }
+    .main-tab.active::after { transform: scaleX(1); }
+
+    /* ── Graph panel ─────────────────────────────────────────────────────────── */
+    #graph-panel {
+      width: 310px;
+      min-width: 260px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px 16px;
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+      overflow-y: auto;
+    }
+    #graph-panel::-webkit-scrollbar { width: 4px; }
+    #graph-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    #graph-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      text-align: center;
+      color: var(--text);
+      letter-spacing: -0.2px;
+    }
+
+    #graph-pdb {
+      font-size: 11px;
+      color: var(--accent);
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      text-align: center;
+      margin: 3px 0 14px;
+      letter-spacing: 1px;
+    }
+
+    #graph-svg { width: 258px; height: 258px; }
+
+    #graph-legend { margin-top: 14px; width: 100%; display: flex; flex-direction: column; gap: 5px; }
+
+    .legend-item { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-muted); }
+
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .legend-dot.assembled { background: #dcfce7; border: 1.5px solid var(--green); }
+    .legend-dot.adding    { background: #fef9c3; border: 2px solid var(--yellow); animation: pulse 1.2s ease-in-out infinite; }
+    .legend-dot.pending   { background: var(--surface2); border: 1.5px solid var(--border); }
+
+    #step-summary {
+      margin-top: 14px;
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 11px 13px;
+    }
+
+    #step-summary h3 {
+      font-size: 9.5px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      font-weight: 700;
+      margin-bottom: 7px;
+    }
+
+    #step-info { font-size: 12px; color: var(--text); line-height: 1.7; }
+    #step-info a { color: var(--accent); text-decoration: none; }
+    #step-info a:hover { text-decoration: underline; }
+
+    /* ── Assembly timeline ───────────────────────────────────────────────────── */
+    #assembly-timeline { margin-top: 13px; width: 100%; }
+    #assembly-timeline h3 {
+      font-size: 9.5px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      font-weight: 700;
+      margin-bottom: 7px;
+    }
+
+    #timeline-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+
+    .tl-chip {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border-radius: 20px;
+      font-size: 10px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all var(--transition);
+      user-select: none;
+    }
+    .tl-chip.tl-done    { background: #f0fdf4; border-color: #bbf7d0; color: var(--text-muted); }
+    .tl-chip.tl-done:hover { border-color: #86efac; color: var(--text); }
+    .tl-chip.tl-current { background: #fefce8; border-color: #fde047; color: #713f12; font-weight: 600; }
+    .tl-chip.tl-pending { background: transparent; border-color: var(--border); color: var(--text-dim); opacity: 0.6; }
+    .tl-chip.tl-pending:hover { opacity: 1; }
+
+    .tl-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+    /* ── Info panel ──────────────────────────────────────────────────────────── */
+    #info-panel {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: var(--bg);
+      min-width: 0;
+    }
+    #info-panel::-webkit-scrollbar { width: 4px; }
+    #info-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .info-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      box-shadow: var(--shadow-sm);
+      animation: fadeUp 0.18s ease;
+      transition: box-shadow var(--transition), border-color var(--transition);
+    }
+    .info-section:hover { box-shadow: var(--shadow); border-color: rgba(99,102,241,0.25); }
+
+    .info-section h3 {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 12px;
+    }
+
+    /* ── Metrics ─────────────────────────────────────────────────────────────── */
+    .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .metric-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      transition: border-color var(--transition);
+    }
+    .metric-card:hover { border-color: rgba(99,102,241,0.3); }
+
+    .metric-card-label {
+      font-size: 9.5px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 8px;
+    }
+
+    .sparkline-container { overflow: visible; }
+
+    .conf-bar-text {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--accent);
+      letter-spacing: -1px;
+    }
+
+    .conf-delta { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+    .radar-container { display: flex; justify-content: center; }
+
+    /* ── Score breakdown ─────────────────────────────────────────────────────── */
+    .score-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+
+    .score-label { width: 40px; font-size: 11px; font-weight: 600; color: var(--text-muted); flex-shrink: 0; }
+
+    .score-bar-track {
+      flex: 1;
+      height: 6px;
+      background: var(--surface2);
+      border-radius: 3px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .score-bar-fill { height: 100%; border-radius: 3px; transition: width 0.45s cubic-bezier(0.4,0,0.2,1); }
+
+    /* "no data" — a channel with nothing behind it for this complex. Drawn as a
+       hatched empty track so it can never be mistaken for a real mid-range bar,
+       which is exactly what the old hardcoded 0.5 looked like. */
+    .score-bar-nodata, .mini-bar-nodata {
+      height: 100%;
+      width: 100%;
+      border-radius: 3px;
+      background: repeating-linear-gradient(
+        45deg, transparent, transparent 3px,
+        var(--border) 3px, var(--border) 6px);
+      opacity: 0.85;
+    }
+    .score-row-nodata .score-label,
+    .score-row-nodata .score-val { color: var(--text-muted); font-style: italic; }
+    .score-explainer {
+      margin-top: 8px;
+      font-size: 9.5px;
+      line-height: 1.45;
+      color: var(--text-muted);
+    }
+
+    .score-val {
+      width: 52px;
+      font-size: 10.5px;
+      color: var(--text);
+      text-align: right;
+      font-family: 'JetBrains Mono', monospace;
+      flex-shrink: 0;
+    }
+
+    /* ── GO terms ────────────────────────────────────────────────────────────── */
+    #go-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+
+    .go-pill {
+      font-size: 10px;
+      padding: 2px 9px;
+      border-radius: 20px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      transition: transform var(--transition);
+      cursor: default;
+    }
+    .go-pill:hover { transform: translateY(-1px); }
+    .go-pill.F { border-color: #c7d2fe; color: #4338ca; background: #eef2ff; }
+    .go-pill.P { border-color: #bbf7d0; color: #166534; background: #f0fdf4; }
+    .go-pill.C { border-color: #ddd6fe; color: #6d28d9; background: #f5f3ff; }
+    .go-pill.predicted { border-style: dashed; opacity: 0.82; font-style: italic; }
+    .go-pill.predicted::after { content: " ✦"; font-style: normal; font-size: 7px; opacity: 0.7; }
+
+    .go-source-line { font-size: 10px; color: var(--text-muted); margin-bottom: 7px; font-weight: 500; }
+    .go-source-line span { color: var(--text); font-weight: 600; }
+    .go-divider {
+      font-size: 9px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      margin: 7px 0 5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+    }
+    .go-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+    .protfunc-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 9px;
+      padding: 1px 7px;
+      border-radius: 20px;
+      background: #f5f3ff;
+      border: 1px dashed #c4b5fd;
+      color: #6d28d9;
+      margin-left: 6px;
+      font-weight: 600;
+    }
+
+    /* ── Functional context ──────────────────────────────────────────────────── */
+    #func-context { font-size: 12px; color: var(--text-muted); line-height: 1.75; }
+
+    /* ── Rejected candidates ─────────────────────────────────────────────────── */
+    #rejected-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+
+    #rejected-table th {
+      text-align: left;
+      padding: 5px 8px;
+      color: var(--text-muted);
+      font-weight: 700;
+      font-size: 9.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+    }
+
+    #rejected-table td {
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      transition: background var(--transition);
+    }
+
+    #rejected-table tr:last-child td { border-bottom: none; }
+    #rejected-table tbody tr:hover td { background: var(--surface2); }
+
+    .mini-bar-track {
+      width: 70px; height: 5px;
+      background: var(--surface3);
+      border-radius: 3px;
+      overflow: hidden;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .mini-bar-fill { height: 100%; border-radius: 3px; opacity: 0.75; }
+
+    /* ── Controls ────────────────────────────────────────────────────────────── */
+    #controls {
+      padding: 9px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    #btn-group { display: flex; gap: 6px; }
+
+    .ctrl-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 13px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 11.5px;
+      font-weight: 500;
+      font-family: 'Inter', sans-serif;
+      transition: all var(--transition);
+      box-shadow: var(--shadow-sm);
+    }
+    .ctrl-btn:hover { background: var(--surface3); border-color: rgba(99,102,241,0.3); }
+    .ctrl-btn:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
+    .ctrl-btn.active { background: #eef2ff; border-color: #c7d2fe; color: var(--accent); }
+
+    #step-dots { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+
+    .step-dot {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      background: var(--surface3);
+      border: 1.5px solid var(--border);
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+    .step-dot:hover { border-color: var(--accent); transform: scale(1.2); }
+    .step-dot.done    { background: var(--green);  border-color: var(--green); }
+    .step-dot.current { background: var(--yellow); border-color: var(--yellow); transform: scale(1.15); }
+
+    #temperature-group { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    #temperature-label { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+    #temperature-slider { width: 90px; accent-color: var(--accent); cursor: pointer; }
+    #temperature-val { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--text); width: 28px; font-weight: 600; }
+
+    #tau-display { display: flex; gap: 16px; align-items: center; }
+    .tau-metric { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+    .tau-metric span { color: var(--text); font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-left: 3px; }
+
+    /* ── Empty state ─────────────────────────────────────────────────────────── */
+    #empty-state {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      font-size: 13.5px;
+      text-align: center;
+      padding: 40px;
+    }
+    #placeholder-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+    }
+    #placeholder-label {
+      font-size: 13px;
+      color: var(--text-muted);
+      max-width: 240px;
+      line-height: 1.5;
+    }
+
+    /* ── Loading overlay ─────────────────────────────────────────────────────── */
+    #loading-overlay { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    #loading-overlay.hidden { display: none; }
+
+    #loading-spinner {
+      width: 30px; height: 30px;
+      border: 2.5px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin-bottom: 12px;
+    }
+
+    #loading-msg { font-size: 13px; color: var(--text-muted); }
+
+    /* ── Browse panel ────────────────────────────────────────────────────────── */
+    #browse-panel {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      overflow: hidden;
+      padding: 20px 24px;
+      background: var(--bg);
+    }
+
+    #browse-controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+      align-items: center;
+    }
+
+    #browse-controls input,
+    #browse-controls select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      padding: 7px 11px;
+      font-size: 12px;
+      font-family: 'Inter', sans-serif;
+      transition: border-color var(--transition);
+      outline: none;
+      box-shadow: var(--shadow-sm);
+    }
+    #browse-controls input:focus,
+    #browse-controls select:focus { border-color: var(--border-focus); }
+    #browse-controls input::placeholder { color: var(--text-dim); }
+    #browse-controls input[type="text"] { flex: 1; min-width: 220px; }
+
+    #browse-search-btn {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 7px 18px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(99,102,241,0.3);
+      transition: opacity var(--transition), transform var(--transition);
+    }
+    #browse-search-btn:hover { opacity: 0.88; transform: translateY(-1px); }
+
+    #browse-stats { font-size: 11.5px; color: var(--text-muted); margin-bottom: 10px; font-weight: 500; }
+
+    #browse-table-wrap {
+      flex: 1;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow-sm);
+    }
+    #browse-table-wrap::-webkit-scrollbar { width: 4px; }
+    #browse-table-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    #browse-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+
+    #browse-table th {
+      background: var(--surface2);
+      color: var(--text-muted);
+      font-weight: 700;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      text-align: left;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    #browse-table td {
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      transition: background var(--transition);
+    }
+
+    #browse-table tr:last-child td { border-bottom: none; }
+    #browse-table tr:hover td { background: var(--accent-light); cursor: pointer; }
+
+    #browse-table code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--accent);
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    .tier-badge {
+      display: inline-block;
+      font-size: 9.5px;
+      font-weight: 700;
+      padding: 1px 8px;
+      border-radius: 20px;
+      letter-spacing: 0.2px;
+    }
+    .tier-t1 { background: #fefce8; color: #854d0e; border: 1px solid #fde047; }
+    .tier-t2 { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; }
+    .tier-t3 { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+
+    #browse-pagination {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 12px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    #browse-pagination button {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      padding: 5px 14px;
+      cursor: pointer;
+      font-size: 11px;
+      font-family: 'Inter', sans-serif;
+      box-shadow: var(--shadow-sm);
+      transition: all var(--transition);
+    }
+    #browse-pagination button:hover { border-color: rgba(99,102,241,0.4); }
+    #browse-pagination button:disabled { opacity: 0.35; cursor: default; box-shadow: none; }
+
+    /* ── About panel ─────────────────────────────────────────────────────────── */
+    #about-panel {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      overflow-y: auto;
+      padding: 40px 56px;
+      background: var(--bg);
+    }
+    #about-panel::-webkit-scrollbar { width: 4px; }
+    #about-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    #about-panel > * { max-width: 820px; }
+
+    #about-panel h2 {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.8px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6 50%, #a855f7);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 4px;
+      line-height: 1.2;
+    }
+
+    .about-subtitle { font-size: 13px; color: var(--text-muted); margin-bottom: 22px; }
+
+    #about-panel h3 {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      margin: 28px 0 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+      letter-spacing: -0.1px;
+    }
+
+    #about-panel p { font-size: 12.5px; color: var(--text-muted); line-height: 1.75; margin-bottom: 12px; }
+    #about-panel strong { color: var(--text); }
+
+    .about-term-grid { display: grid; grid-template-columns: 150px 1fr; gap: 8px 16px; font-size: 12.5px; margin-bottom: 14px; }
+    .about-term-label { color: var(--text); font-weight: 600; padding-top: 2px; font-size: 12px; }
+    .about-term-desc { color: var(--text-muted); line-height: 1.65; }
+
+    .about-score-swatch {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 2px;
+      margin-right: 5px;
+      vertical-align: middle;
+    }
+
+    .about-key-row { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+
+    kbd {
+      display: inline-block;
+      padding: 2px 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-bottom: 2px solid var(--border);
+      border-radius: 5px;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .about-note {
+      background: #eef2ff;
+      border: 1px solid #c7d2fe;
+      border-left: 3px solid var(--accent);
+      border-radius: var(--radius-sm);
+      padding: 12px 16px;
+      font-size: 12px;
+      color: #3730a3;
+      line-height: 1.65;
+      margin-bottom: 14px;
+    }
+
+    #cite-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 7px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 11.5px;
+      font-weight: 500;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      box-shadow: var(--shadow-sm);
+      transition: all var(--transition);
+      margin-bottom: 20px;
+    }
+    #cite-btn:hover { border-color: rgba(99,102,241,0.5); color: var(--text); transform: translateY(-1px); box-shadow: var(--shadow); }
+    #cite-btn.copied { border-color: var(--green); color: var(--green); }
+
+    .step-correct { color: var(--green);  font-weight: 600; }
+    .step-wrong   { color: var(--red);    font-weight: 600; }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ── Mutations panel ─────────────────────────────────────────────────────── */
+    #mutate-panel {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      overflow-y: auto;
+      padding: 32px 48px;
+      background: var(--bg);
+      gap: 18px;
+    }
+    #mutate-panel::-webkit-scrollbar { width: 4px; }
+    #mutate-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .mut-section-title {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.6px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 2px;
+    }
+    .mut-section-sub { font-size: 12.5px; color: var(--text-muted); margin-bottom: 6px; }
+
+    .mut-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      box-shadow: var(--shadow-sm);
+      max-width: 780px;
+    }
+    .mut-card-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .mut-form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 80px 80px 1fr;
+      gap: 10px;
+      align-items: end;
+      margin-bottom: 12px;
+    }
+    .mut-field label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .mut-field select, .mut-field input[type=text], .mut-field input[type=number] {
+      width: 100%;
+      padding: 7px 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 12.5px;
+      color: var(--text);
+      font-family: inherit;
+      outline: none;
+      transition: border-color var(--transition);
+    }
+    .mut-field select:focus, .mut-field input:focus { border-color: var(--border-focus); }
+
+    .mut-seq-context {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 6px 10px;
+      margin-bottom: 12px;
+      letter-spacing: 0.05em;
+      min-height: 28px;
+    }
+    .mut-seq-context .ctx-hl {
+      color: var(--accent);
+      font-weight: 700;
+      background: rgba(99,102,241,0.12);
+      padding: 0 2px;
+      border-radius: 3px;
+    }
+
+    .mut-analyse-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 20px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: opacity var(--transition), transform var(--transition);
+    }
+    .mut-analyse-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    .mut-analyse-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    .mut-spinner {
+      display: none;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,0.35);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.65s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .mut-error {
+      display: none;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-left: 3px solid var(--red);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      font-size: 12px;
+      color: #b91c1c;
+    }
+    .mut-backend-note {
+      background: #eef2ff;
+      border: 1px solid #c7d2fe;
+      border-left: 3px solid var(--accent);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      font-size: 12px;
+      color: #3730a3;
+      margin-bottom: 6px;
+    }
+
+    .mut-badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-right: 5px;
+    }
+    .mut-badge-silent   { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+    .mut-badge-missense { background: rgba(234,117,34,0.12); color: var(--orange); border: 1px solid rgba(234,117,34,0.25); }
+    .mut-badge-nonsense { background: rgba(220,38,38,0.1); color: var(--red); border: 1px solid rgba(220,38,38,0.25); }
+    .mut-sev-none     { background: var(--green-light); color: var(--green); border: 1px solid rgba(22,163,74,0.25); }
+    .mut-sev-weak     { background: rgba(202,138,4,0.1); color: var(--yellow); border: 1px solid rgba(202,138,4,0.25); }
+    .mut-sev-moderate { background: rgba(234,117,34,0.12); color: var(--orange); border: 1px solid rgba(234,117,34,0.25); }
+    .mut-sev-strong   { background: rgba(220,38,38,0.1); color: var(--red); border: 1px solid rgba(220,38,38,0.25); }
+
+    .delta-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+    .delta-bar-label { width: 60px; font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
+    .delta-bar-track { flex: 1; height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+    .delta-bar-fill  { height: 100%; border-radius: 4px; transition: width 0.3s; }
+    .delta-bar-value { width: 44px; font-size: 11.5px; font-family: 'JetBrains Mono', monospace; text-align: right; }
+
+    #mut-kde-svg { display: block; width: 100%; max-width: 440px; height: 80px; }
+
+    .score-dots-row { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 0; }
+    .score-dot {
+      width: 14px; height: 14px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    .mut-go-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .mut-go-table th {
+      text-align: left;
+      padding: 5px 8px;
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .mut-go-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); color: var(--text-muted); }
+    .mut-go-table tr:last-child td { border-bottom: none; }
+    .go-delta-pos { color: var(--green); font-weight: 600; }
+    .go-delta-neg { color: var(--red); font-weight: 600; }
+
+    .mut-results-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+    .mut-result-header { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+  </style>
+</head>
+<body>
+
+<!-- ══ LANDING ════════════════════════════════════════════════════════════════ -->
+<div id="landing">
+
+  <nav id="home-nav">
+    <a class="nav-logo" href="#">PRISM</a>
+    <div class="nav-links">
+      <a href="https://github.com/SBhat2026" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://huggingface.co/Sbhat2026/prism" target="_blank" rel="noopener">Models</a>
+    </div>
+    <button class="nav-enter" data-cta="simulate">Open App</button>
+  </nav>
+
+  <!-- Hero -->
+  <section id="hero">
+    <canvas id="hero-canvas"></canvas>
+    <div class="hero-content">
+      <div class="hero-eyebrow reveal">Research preview · v4</div>
+      <h1 class="hero-h1 reveal reveal-delay-1">Predicting how<br><em>protein complexes</em><br>assemble.</h1>
+      <p class="hero-sub reveal reveal-delay-2">A graph attention network that predicts the sequential assembly order of multi-subunit protein complexes from structure and sequence alone — no kinetics data required.</p>
+      <div class="hero-ctas reveal reveal-delay-3">
+        <button class="cta-primary" data-cta="simulate">Explore simulations →</button>
+        <button class="cta-secondary" data-cta="browse">Browse 15K complexes</button>
+      </div>
+    </div>
+    <div class="hero-scroll-hint">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 5v14M5 12l7 7 7-7"/>
+      </svg>
+      Scroll to explore
+    </div>
+  </section>
+
+  <!-- Stat strip -->
+  <div id="stat-strip">
+    <div class="stat-item reveal">
+      <span class="stat-val" data-metric="corpus_size">15,201</span>
+      <span class="stat-label">labeled complexes</span>
+    </div>
+    <div class="stat-item reveal reveal-delay-1">
+      <span class="stat-val" data-metric="tau_heldout">0.98</span>
+      <span class="stat-label">Kendall τ (held-out set)</span>
+    </div>
+    <div class="stat-item reveal reveal-delay-2">
+      <span class="stat-val" data-metric="top1_pct">96%</span>
+      <span class="stat-label">top-1 accuracy (held-out)</span>
+    </div>
+    <div class="stat-item reveal reveal-delay-3">
+      <span class="stat-val" data-metric="node_dim">655d</span>
+      <span class="stat-label">node features (ESM-2 + pLDDT + SASA + geom)</span>
+    </div>
+  </div>
+
+  <!-- Architecture overview -->
+  <section class="scrollytell" data-stage="0" style="background:var(--surface);">
+    <div class="scrollytell-inner reverse">
+      <div class="story-canvas-wrap">
+        <svg viewBox="0 0 320 260" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;border-radius:var(--radius);background:var(--bg);border:1px solid var(--border);box-shadow:var(--shadow);">
+          <!-- Input chains -->
+          <rect x="8" y="20" width="56" height="28" rx="5" fill="#eef2ff" stroke="#6366f1" stroke-width="1.2"/>
+          <text x="36" y="38" font-size="8" fill="#4338ca" text-anchor="middle" font-family="Inter,sans-serif" font-weight="600">Chain A…N</text>
+          <!-- ESM-2 box -->
+          <rect x="74" y="8" width="72" height="52" rx="6" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+          <text x="110" y="28" font-size="8" fill="#6d28d9" text-anchor="middle" font-family="Inter,sans-serif" font-weight="700">ESM-2</text>
+          <text x="110" y="40" font-size="7" fill="#7c3aed" text-anchor="middle" font-family="Inter,sans-serif">150M params</text>
+          <text x="110" y="52" font-size="7" fill="#8b5cf6" text-anchor="middle" font-family="Inter,sans-serif">640d embed</text>
+          <!-- Feature stack -->
+          <rect x="158" y="4" width="76" height="60" rx="6" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+          <text x="196" y="20" font-size="7" fill="#15803d" text-anchor="middle" font-family="Inter,sans-serif" font-weight="700">Node features</text>
+          <text x="196" y="31" font-size="6.5" fill="#166534" text-anchor="middle" font-family="Inter,sans-serif">+5d pLDDT</text>
+          <text x="196" y="41" font-size="6.5" fill="#166534" text-anchor="middle" font-family="Inter,sans-serif">+1d SASA</text>
+          <text x="196" y="51" font-size="6.5" fill="#15803d" text-anchor="middle" font-family="Inter,sans-serif" font-weight="600">+9d geom ✦new</text>
+          <text x="196" y="61" font-size="7" fill="#14532d" text-anchor="middle" font-family="JetBrains Mono,monospace" font-weight="700">= 655d</text>
+          <!-- Edge features -->
+          <rect x="8" y="80" width="226" height="30" rx="5" fill="#fff7ed" stroke="#ea7522" stroke-width="1.2"/>
+          <text x="121" y="95" font-size="7" fill="#c2410c" text-anchor="middle" font-family="Inter,sans-serif" font-weight="600">Edge features: BSA · ESM-cos · GO-cos · PPI · VoroIF ✦ = 5d</text>
+          <!-- GAT layers -->
+          <rect x="8" y="128" width="226" height="48" rx="6" fill="#eff6ff" stroke="#0891b2" stroke-width="1.5"/>
+          <text x="121" y="146" font-size="8" fill="#0369a1" text-anchor="middle" font-family="Inter,sans-serif" font-weight="700">GAT × 3 layers · 4 heads · 128d hidden</text>
+          <text x="121" y="159" font-size="7" fill="#0284c7" text-anchor="middle" font-family="Inter,sans-serif">Message-passing over partial complex graph</text>
+          <text x="121" y="170" font-size="7" fill="#0369a1" text-anchor="middle" font-family="Inter,sans-serif">Multi-head attention weights edge features</text>
+          <!-- Score head -->
+          <rect x="8" y="192" width="226" height="28" rx="5" fill="#fef2f2" stroke="#dc2626" stroke-width="1.2"/>
+          <text x="121" y="210" font-size="7.5" fill="#b91c1c" text-anchor="middle" font-family="Inter,sans-serif" font-weight="600">Score head → compatibility score per candidate</text>
+          <!-- Output -->
+          <rect x="8" y="234" width="226" height="22" rx="5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1"/>
+          <text x="121" y="249" font-size="7.5" fill="#475569" text-anchor="middle" font-family="Inter,sans-serif" font-weight="600">Greedy assembly order (subunit ranking)</text>
+          <!-- Arrows -->
+          <line x1="64" y1="34" x2="74" y2="34" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr)"/>
+          <line x1="146" y1="34" x2="158" y2="34" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr)"/>
+          <line x1="196" y1="64" x2="196" y2="80" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="3,2"/>
+          <line x1="121" y1="64" x2="121" y2="80" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="3,2"/>
+          <line x1="121" y1="110" x2="121" y2="128" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr)"/>
+          <line x1="121" y1="176" x2="121" y2="192" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr)"/>
+          <line x1="121" y1="220" x2="121" y2="234" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arr)"/>
+          <defs>
+            <marker id="arr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill="#94a3b8"/>
+            </marker>
+          </defs>
+          <text x="248" y="18" font-size="7" fill="#9ca3af" text-anchor="start" font-family="Inter,sans-serif">v4 arch</text>
+        </svg>
+      </div>
+      <div class="story-text">
+        <div class="stage-num reveal">Architecture</div>
+        <h2 class="reveal reveal-delay-1">Graph attention over a growing complex.</h2>
+        <p class="reveal reveal-delay-2">Each chain becomes a 655-dimensional node (640d ESM-2 language model + 5d pLDDT + 1d SASA + 9d monomer geometry from AlphaFold). Chain pairs are connected by 5-dimensional edges encoding structural and functional compatibility. A 3-layer GAT reads the partial complex and ranks every candidate next subunit.</p>
+        <div class="story-stat reveal reveal-delay-3"><strong>655d</strong> nodes · <strong>5d</strong> edges · <strong>~1M</strong> params</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Scroll storytelling sections -->
+  <section class="scrollytell" data-stage="1">
+    <div class="scrollytell-inner">
+      <div class="story-canvas-wrap">
+        <canvas id="story-canvas" width="300" height="300"></canvas>
+      </div>
+      <div class="story-text">
+        <div class="stage-num reveal">Step 1 — Representation</div>
+        <h2 class="reveal reveal-delay-1">Each subunit becomes a node in a graph.</h2>
+        <p class="reveal reveal-delay-2">PRISM encodes every protein chain using ESM-2 (640d language model embeddings) enriched with per-residue pLDDT confidence, surface accessibility (SASA), and 9 monomer-geometry features derived from AlphaFold structures (radius of gyration, sphericity, principal axis ratios). The result: a 655-dimensional feature vector per chain.</p>
+        <div class="story-stat reveal reveal-delay-3"><strong>640d</strong> ESM-2 + <strong>5d</strong> pLDDT + <strong>1d</strong> SASA + <strong>9d</strong> geom</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="scrollytell" data-stage="2">
+    <div class="scrollytell-inner reverse">
+      <div class="story-canvas-wrap"><canvas id="story-canvas-2" width="320" height="280"></canvas></div>
+      <div class="story-text">
+        <div class="stage-num reveal">Step 2 — Edge features</div>
+        <h2 class="reveal reveal-delay-1">Pairwise interactions define the edges.</h2>
+        <p class="reveal reveal-delay-2">For each chain pair the model computes buried surface area (BSA), STRING PPI confidence, GO-term similarity, ESM cosine similarity, and Voronoi-inspired Cα contact density (number of CA-CA contacts within 8Å, normalised by chain sizes). These five edge features encode interface affinity between chain pairs.</p>
+        <div class="story-stat reveal reveal-delay-3"><strong>5d</strong> edge features per pair · <strong>+VoroIF</strong> contact density</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="scrollytell" data-stage="3">
+    <div class="scrollytell-inner">
+      <div class="story-canvas-wrap"><canvas id="story-canvas-3" width="320" height="280"></canvas></div>
+      <div class="story-text">
+        <div class="stage-num reveal">Step 3 — Assembly path</div>
+        <h2 class="reveal reveal-delay-1">A GNN scores each possible next docking step.</h2>
+        <p class="reveal reveal-delay-2">At each assembly step, a 3-layer Graph Attention Network reads the current partial complex and scores all candidate chains. The highest-scored chain docks next. PRISM repeats this greedy process until the complex is fully assembled.</p>
+        <div class="story-stat reveal reveal-delay-3"><strong>3</strong> GAT layers · <strong>4</strong> heads · <strong>128</strong>d hidden</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="scrollytell" data-stage="4">
+    <div class="scrollytell-inner reverse">
+      <div class="story-canvas-wrap"><canvas id="story-canvas-4" width="320" height="280"></canvas></div>
+      <div class="story-text">
+        <div class="stage-num reveal">Step 4 — Evaluation</div>
+        <h2 class="reveal reveal-delay-1">Validated against experimentally determined assembly orders.</h2>
+        <p class="reveal reveal-delay-2">PRISM achieves τ = 1.00 on the Marsh 2013 benchmark (10 complexes, pulse-chase mass spectrometry ground truth), τ = 0.98 on a held-out experimental set, and τ = 0.92 on the independent Path-LZerD benchmark (21 complexes, never seen during training). Backed by recent AlphaFold interpretability work showing that complex assembly is governed by monomer-level structural geometry — precisely what PRISM's node features encode.</p>
+        <div class="story-stat reveal reveal-delay-3"><strong data-metric="tau_heldout">0.98</strong> held-out · <strong data-metric="tau_marsh">1.00</strong> Marsh 2013 · <strong>0.92</strong> Path-LZerD · <strong data-metric="top1_pct">96%</strong> top-1</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer CTA -->
+  <section id="footer-cta">
+    <h2 class="reveal">Ready to explore?</h2>
+    <p class="reveal reveal-delay-1">Load a PDB ID to run a live assembly simulation, or browse the full 15K complex database.</p>
+    <div class="ctas reveal reveal-delay-2">
+      <button class="cta-primary" data-cta="simulate">Explore simulations →</button>
+      <button class="cta-secondary" data-cta="browse">Browse the database</button>
+    </div>
+  </section>
+
+  <section id="landing-about" style="padding:64px 40px;max-width:860px;margin:0 auto;border-top:1px solid var(--border);">
+    <h2 style="font-size:1.4rem;font-weight:700;color:var(--text);margin-bottom:6px;">About</h2>
+    <p style="font-size:0.875rem;color:var(--text-muted);margin-bottom:24px;">
+      PRISM is built and maintained by <strong style="color:var(--text);">Siddhant Bhat</strong>, a computational biology researcher focused on machine learning for structural biology and protein function prediction.
+    </p>
+    <div style="display:flex;gap:32px;flex-wrap:wrap;margin-bottom:32px;">
+      <div>
+        <div style="font-size:0.75rem;font-weight:600;color:var(--text);margin-bottom:10px;letter-spacing:0.05em;text-transform:uppercase;">Other Projects</div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <a href="https://playphylo.org" target="_blank" rel="noopener" style="font-size:0.82rem;color:var(--accent);text-decoration:none;">Phylo — Taxonomic guessing game</a>
+          <a href="https://protfunc.prismlab.workers.dev" target="_blank" rel="noopener" style="font-size:0.82rem;color:var(--accent);text-decoration:none;">ProtFunc — GO-MF prediction across Metazoa</a>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:0.75rem;font-weight:600;color:var(--text);margin-bottom:10px;letter-spacing:0.05em;text-transform:uppercase;">Contact</div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <a href="https://github.com/SBhat2026" target="_blank" rel="noopener" style="font-size:0.82rem;color:var(--text-muted);text-decoration:none;">GitHub @SBhat2026</a>
+          <a href="mailto:siddhantbhat3@gmail.com" style="font-size:0.82rem;color:var(--text-muted);text-decoration:none;">siddhantbhat3@gmail.com</a>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:0.75rem;font-weight:600;color:var(--text);margin-bottom:10px;letter-spacing:0.05em;text-transform:uppercase;">Acknowledgements</div>
+        <div style="font-size:0.82rem;color:var(--text-muted);line-height:1.7;">ESM-2 (Lin et al. 2023) · PyG · Marsh et al. 2013 · RCSB PDB · AlphaFold DB · Bou Sleiman et al. 2026 (bioRxiv 2026.04.03.716280)</div>
+      </div>
+    </div>
+    <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:10px;font-weight:600;">How to cite</div>
+    <div style="position:relative;">
+      <pre id="prism-bibtex" style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:16px;font-family:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;font-size:0.72rem;line-height:1.6;color:var(--text-muted);overflow-x:auto;white-space:pre;">@software{bhat_prism_2026,
+  author = {Bhat, Siddhant},
+  title  = {{PRISM}: Protein Ranking by Interface and Sequence Modeling},
+  year   = {2026},
+  url    = {https://prism-assembly.prismlab.workers.dev}
+}</pre>
+      <button onclick="(function(){navigator.clipboard.writeText(document.getElementById('prism-bibtex').textContent).then(()=>{this.textContent='Copied!';setTimeout(()=>{this.textContent='Copy'},1500)}).catch(()=>{})}).call(this)" style="position:absolute;top:10px;right:10px;padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);font-size:0.72rem;cursor:pointer;">Copy</button>
+    </div>
+  </section>
+
+  <footer class="home-footer">
+    <span>PRISM · Protein Assembly Prediction · v4</span>
+    <span>Built with ESM-2, PyG, FastAPI · <a href="https://huggingface.co/Sbhat2026/PRISM" target="_blank" rel="noopener">HuggingFace Space</a></span>
+  </footer>
+
+</div>
+<!-- ══ END LANDING ════════════════════════════════════════════════════════════ -->
+
+<!-- ══ APP (hidden until CTA) ════════════════════════════════════════════════ -->
+<div id="app" hidden>
+
+<div id="loading-overlay" class="hidden">
+  <div id="loading-spinner"></div>
+  <div id="loading-msg">Loading ESM-2 and running simulations…</div>
+</div>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <div id="sidebar-header">
+    <h1>PRISM</h1>
+    <p>Protein assembly order prediction</p>
+    <div id="sidebar-score-bar">
+      <div class="sb-sasa"></div>
+      <div class="sb-esm"></div>
+      <div class="sb-go"></div>
+      <div class="sb-ppi"></div>
+    </div>
+    <div id="sidebar-score-labels">
+      <span class="sb-label"><span class="sb-label-dot" style="background:var(--sasa-color)"></span>SASA 40%</span>
+      <span class="sb-label"><span class="sb-label-dot" style="background:var(--esm-color)"></span>ESM 35%</span>
+      <span class="sb-label"><span class="sb-label-dot" style="background:var(--go-color)"></span>GO 15%</span>
+      <span class="sb-label"><span class="sb-label-dot" style="background:var(--ppi-color)"></span>PPI 10%</span>
+    </div>
+  </div>
+
+  <div id="pdb-input-wrap">
+    <input id="pdb-input" placeholder="PDB ID (e.g. 1AON)" maxlength="4"
+           onkeydown="if(event.key==='Enter')loadPdbInput()" autocomplete="off" spellcheck="false" />
+    <button id="pdb-load-btn" onclick="loadPdbInput()">Load</button>
+  </div>
+  <div id="pdb-load-status"></div>
+
+  <div id="sidebar-examples">
+    <div class="examples-label">Benchmark examples</div>
+    <div id="example-chips"></div>
+  </div>
+
+  <div id="status-bar">Status: <span id="status-text">initializing…</span></div>
+</div>
+
+<!-- Main -->
+<div id="main">
+  <div id="main-tabs">
+    <div class="main-tab active" id="tab-sim"    onclick="switchTab('sim')">Simulation</div>
+    <div class="main-tab"        id="tab-browse" onclick="switchTab('browse')">Browse 15K</div>
+    <div class="main-tab"        id="tab-mutate" onclick="switchTab('mutate')">Mutations</div>
+    <div class="main-tab"        id="tab-about"  onclick="switchTab('about')">About</div>
+  </div>
+
+  <div id="main-content">
+    <!-- Graph panel -->
+    <div id="graph-panel" style="display:none">
+      <div id="graph-title"></div>
+      <div id="graph-pdb"></div>
+      <svg id="graph-svg" viewBox="0 0 258 258"></svg>
+      <div id="graph-legend">
+        <div class="legend-item"><div class="legend-dot assembled"></div> Assembled</div>
+        <div class="legend-item"><div class="legend-dot adding"></div> Adding now</div>
+        <div class="legend-item"><div class="legend-dot pending"></div> Pending</div>
+      </div>
+      <div id="step-summary">
+        <h3>Step info</h3>
+        <div id="step-info">—</div>
+      </div>
+      <div id="assembly-timeline">
+        <h3>Assembly timeline</h3>
+        <div id="timeline-chips"></div>
+      </div>
+    </div>
+
+    <!-- Info panel -->
+    <div id="info-panel">
+      <div id="empty-state">
+        <div id="placeholder-wrap">
+          <svg id="placeholder-svg" viewBox="0 0 258 258" width="258" height="258"></svg>
+          <div id="placeholder-label">Enter a PDB ID or select an example to begin</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Browse panel -->
+    <div id="browse-panel">
+      <div id="browse-controls">
+        <input type="text" id="browse-query" placeholder="PDB ID or source… (press / to focus)"
+               oninput="browseDebounce()" onkeydown="if(event.key==='Enter')browseSearch()">
+        <select id="browse-source" onchange="browseSearch()">
+          <option value="all">All sources</option>
+          <option value="CORUM">CORUM</option>
+          <option value="RCSB">RCSB PDB</option>
+          <option value="Complex Portal">Complex Portal</option>
+          <option value="Experimental GT">Experimental GT</option>
+        </select>
+        <select id="browse-tier" onchange="browseSearch()">
+          <option value="all">All tiers</option>
+          <option value="T1">★ Tier 1 (experimental)</option>
+          <option value="T2">◆ Tier 2 (BSA + PDB)</option>
+          <option value="T3">◇ Tier 3 (seq proxy)</option>
+        </select>
+        <select id="browse-type" onchange="browseSearch()">
+          <option value="all">All types</option>
+          <option value="heteromer">Heteromer</option>
+          <option value="homomer">Homomer</option>
+        </select>
+        <select id="browse-nmin" onchange="browseSearch()">
+          <option value="2">N≥2</option><option value="3">N≥3</option>
+          <option value="4">N≥4</option><option value="6">N≥6</option>
+        </select>
+        <select id="browse-nmax" onchange="browseSearch()">
+          <option value="60">N≤60</option><option value="12">N≤12</option><option value="8">N≤8</option>
+          <option value="6">N≤6</option><option value="4">N≤4</option>
+        </select>
+        <select id="browse-sort" onchange="browseSearch()">
+          <option value="pdb_id">Sort: PDB ID ↑</option>
+          <option value="n_asc">Sort: N ↑</option>
+          <option value="n_desc">Sort: N ↓</option>
+          <option value="tier">Sort: Tier</option>
+        </select>
+        <button id="browse-search-btn" onclick="browseSearch()">Search</button>
+        <button id="browse-reset-btn" onclick="browseReset()" style="display:none">Reset</button>
+      </div>
+      <div id="browse-stats">Loading corpus…</div>
+      <div id="browse-table-wrap">
+        <table id="browse-table">
+          <thead><tr>
+            <th>PDB</th><th>N</th><th>Type</th><th>Tier</th><th>Source</th>
+          </tr></thead>
+          <tbody id="browse-tbody">
+            <tr class="browse-skeleton"><td><div class="skel-bar" style="width:44px"></div></td><td><div class="skel-bar" style="width:18px"></div></td><td><div class="skel-bar" style="width:70px"></div></td><td><div class="skel-bar" style="width:40px"></div></td><td><div class="skel-bar" style="width:60px"></div></td></tr>
+            <tr class="browse-skeleton"><td><div class="skel-bar" style="width:44px"></div></td><td><div class="skel-bar" style="width:18px"></div></td><td><div class="skel-bar" style="width:70px"></div></td><td><div class="skel-bar" style="width:40px"></div></td><td><div class="skel-bar" style="width:60px"></div></td></tr>
+            <tr class="browse-skeleton"><td><div class="skel-bar" style="width:44px"></div></td><td><div class="skel-bar" style="width:18px"></div></td><td><div class="skel-bar" style="width:70px"></div></td><td><div class="skel-bar" style="width:40px"></div></td><td><div class="skel-bar" style="width:60px"></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="browse-empty" style="display:none;padding:40px 0;text-align:center;color:var(--text-muted);font-size:13px;">
+        No complexes match your filters. <button onclick="browseReset()" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;text-decoration:underline;">Reset filters</button>
+      </div>
+      <div id="browse-pagination">
+        <button id="browse-prev" onclick="browsePage(-1)" disabled>← Prev</button>
+        <span id="browse-page-info"></span>
+        <button id="browse-next" onclick="browsePage(1)" disabled>Next →</button>
+      </div>
+    </div>
+
+    <!-- About panel -->
+    <div id="about-panel">
+      <h2>Protein Assembly Viewer</h2>
+      <p class="about-subtitle">GNN-guided subunit ordering · PRISM v4 · 15K complex corpus</p>
+      <button id="cite-btn" onclick="copyCitation()">Copy citation</button>
+      <p>A tool for visualising how a protein complex assembles one subunit at a time. The model greedily picks the next best subunit to join the growing structure, based on four scoring signals. Step through manually, play automatically, or adjust the temperature to explore stochastic orderings.</p>
+
+      <h3>The four scoring terms</h3>
+      <div class="about-term-grid">
+        <span class="about-term-label"><span class="about-score-swatch" style="background:var(--sasa-color)"></span>SASA (40%)</span>
+        <span class="about-term-desc"><strong>Surface-Accessible Surface Area proxy.</strong> Approximated by sequence length relative to total complex mass. Larger subunits nucleate or join earlier.</span>
+        <span class="about-term-label"><span class="about-score-swatch" style="background:var(--esm-color)"></span>ESM (35%)</span>
+        <span class="about-term-desc"><strong>Sequence embedding similarity.</strong> Mean cosine similarity between the candidate's ESM-2 150M embedding and already-assembled subunits. Reflects evolutionary co-adaptation.</span>
+        <span class="about-term-label"><span class="about-score-swatch" style="background:var(--go-color)"></span>GO (15%)</span>
+        <span class="about-term-desc"><strong>Gene Ontology coherence.</strong> Jaccard similarity between the candidate's GO molecular-function terms and those of assembled subunits. Predicted terms (✦) augment experimental annotations.</span>
+        <span class="about-term-label"><span class="about-score-swatch" style="background:var(--ppi-color)"></span>PPI (10%)</span>
+        <span class="about-term-desc"><strong>Protein–protein interaction confidence.</strong> Fetched from STRING (score 0–1). Falls back to 0.5 if unavailable.</span>
+      </div>
+
+      <h3>Metrics</h3>
+      <div class="about-term-grid">
+        <span class="about-term-label">Kendall's τ</span>
+        <span class="about-term-desc">Rank correlation between predicted and ground-truth assembly order. τ=1 is perfect; τ=−1 is reversed. Ring complexes use max over all 2N cyclic rotations.</span>
+        <span class="about-term-label">τ sparkline</span>
+        <span class="about-term-desc">Partial Kendall τ at each step — shows how early the model locks in the correct ordering.</span>
+        <span class="about-term-label">Radar chart</span>
+        <span class="about-term-desc">4-axis score profile (SASA/ESM/PPI/GO) for winner (indigo) vs runner-up (red dashed).</span>
+        <span class="about-term-label">Confidence bar</span>
+        <span class="about-term-desc">Softmax probability of the chosen candidate. Delta = margin over runner-up.</span>
+      </div>
+
+      <h3>Keyboard shortcuts</h3>
+      <div class="about-key-row"><kbd>→</kbd> Next step</div>
+      <div class="about-key-row"><kbd>←</kbd> Previous step</div>
+      <div class="about-key-row"><kbd>Space</kbd> Play / Pause</div>
+
+      <h3>Research roadmap</h3>
+      <div class="about-term-grid">
+        <span class="about-term-label">Equivariant GNN</span>
+        <span class="about-term-desc">Replace the flat 646d ESM mean-pool with rotation-equivariant message passing (EGNN / SE(3)-Transformer) over chain centroids — should improve accuracy on large heteromers where spatial geometry matters.</span>
+        <span class="about-term-label">AlphaFold-Multimer (Tier 3)</span>
+        <span class="about-term-desc">Unlock 7,738 sequence-only complexes by predicting structures with AF-Multimer, then re-scoring with the same BSA pipeline. Adds ~50% more training data.</span>
+        <span class="about-term-label">Hierarchical assembly</span>
+        <span class="about-term-desc">Domain-decompose >12-subunit complexes (NPC, ribosome, proteasome) into modules, predict module order, then intra-module order — avoids the O(N!) blow-up at large N.</span>
+        <span class="about-term-label">Symmetry-aware loss</span>
+        <span class="about-term-desc">Generalise Marsh ring augmentation to arbitrary cyclic/dihedral symmetry: fold the known symmetry of homomers into the label space so the model isn't penalised for equivalent orderings.</span>
+        <span class="about-term-label">Curriculum learning</span>
+        <span class="about-term-desc">Train Tier 1 → Tier 2 → Tier 3 with increasing N_subunits per epoch. Lets the model learn simple dimers / trimers before tackling large rings.</span>
+        <span class="about-term-label">Ensembles + calibration</span>
+        <span class="about-term-desc">Ensemble 3 seeds, average logits; extend single-temperature Platt scaling to per-N_subunits temperatures. Reduces variance on small complexes without hurting large ones.</span>
+      </div>
+
+      <div class="about-note">ProtFunc GO-term predictions (✦) are fetched from the ProtFunc server. If unavailable, PRISM falls back to UniProt experimental annotations only.</div>
+    </div>
+
+    <!-- Mutations panel -->
+    <div id="mutate-panel">
+      <div class="mut-section-title">Mutation Analysis</div>
+      <p class="mut-section-sub">Predict how a point mutation changes assembly order, pathway routing, and scoring confidence.</p>
+
+      <div class="mut-backend-note">
+        <strong>Backend note:</strong> Mutations are scored by the PRISM GNN running on the HuggingFace Space. First request may take ~30 s while the Space warms up.
+      </div>
+
+      <!-- Input card -->
+      <div class="mut-card">
+        <div class="mut-card-title">Select Mutation</div>
+        <div class="mut-form-grid">
+          <div class="mut-field">
+            <label>Complex</label>
+            <select id="mut-complex-sel" onchange="onMutComplexChange()"></select>
+          </div>
+          <div class="mut-field">
+            <label>Chain</label>
+            <select id="mut-chain-sel" onchange="onMutChainChange()"></select>
+          </div>
+          <div class="mut-field">
+            <label>Position</label>
+            <input type="number" id="mut-pos" min="1" value="1" oninput="onMutPosChange()">
+          </div>
+          <div class="mut-field">
+            <label>WT AA</label>
+            <input type="text" id="mut-wt-aa" maxlength="1" placeholder="?" readonly style="cursor:default;color:var(--text-muted)">
+          </div>
+          <div class="mut-field">
+            <label>Mutant AA</label>
+            <select id="mut-aa-sel">
+              <option value="A">A — Ala</option><option value="R">R — Arg</option>
+              <option value="N">N — Asn</option><option value="D">D — Asp</option>
+              <option value="C">C — Cys</option><option value="Q">Q — Gln</option>
+              <option value="E">E — Glu</option><option value="G">G — Gly</option>
+              <option value="H">H — His</option><option value="I">I — Ile</option>
+              <option value="L">L — Leu</option><option value="K">K — Lys</option>
+              <option value="M">M — Met</option><option value="F">F — Phe</option>
+              <option value="P">P — Pro</option><option value="S">S — Ser</option>
+              <option value="T">T — Thr</option><option value="W">W — Trp</option>
+              <option value="Y">Y — Tyr</option><option value="V">V — Val</option>
+            </select>
+          </div>
+        </div>
+        <div class="mut-seq-context" id="mut-seq-context">Select a complex to load sequence…</div>
+        <button class="mut-analyse-btn" id="btn-analyse-mut" onclick="runMutAnalysis()">
+          <span class="mut-spinner" id="mut-spinner"></span>
+          Analyse Mutation
+        </button>
+        <div class="mut-error" id="mut-error"></div>
+      </div>
+
+      <!-- Results (hidden until analysis runs) -->
+      <div id="mut-results" style="display:none">
+
+        <!-- Card 1: Summary -->
+        <div class="mut-card">
+          <div class="mut-card-title">Summary</div>
+          <div class="mut-result-header" id="mut-r-header"></div>
+          <div id="mut-r-badges" style="margin-bottom:12px"></div>
+          <div id="mut-r-delta-emb"></div>
+          <div id="mut-r-delta-func"></div>
+        </div>
+
+        <!-- Card 2: Δτ KDE -->
+        <div class="mut-card">
+          <div class="mut-card-title">Assembly Order Impact (Δτ)</div>
+          <svg id="mut-kde-svg" viewBox="0 0 400 80" preserveAspectRatio="none"></svg>
+          <div class="mut-results-subtitle" id="mut-r-tau-subtitle"></div>
+        </div>
+
+        <!-- Card 3: GT probability per step -->
+        <div class="mut-card">
+          <div class="mut-card-title" id="mut-r-score-title">GT probability per step</div>
+          <div style="margin-bottom:6px">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">WT</div>
+            <div class="score-dots-row" id="mut-r-wt-scores"></div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Mutant</div>
+            <div class="score-dots-row" id="mut-r-mut-scores"></div>
+          </div>
+          <div class="mut-results-subtitle" id="mut-r-score-subtitle"></div>
+        </div>
+
+        <!-- Card 4: KL divergence per step -->
+        <div class="mut-card">
+          <div class="mut-card-title">Scoring Divergence per Step (KL)</div>
+          <div id="mut-r-entropy"></div>
+          <div style="margin-top:8px;font-size:12px" id="mut-r-entropy-arrow"></div>
+          <div class="mut-results-subtitle" id="mut-r-order-change"></div>
+        </div>
+
+        <!-- Card 5: GO terms -->
+        <div class="mut-card">
+          <div class="mut-card-title">GO Term Changes</div>
+          <table class="mut-go-table">
+            <thead><tr><th>GO ID</th><th>Term</th><th>WT prob</th><th>Mut prob</th><th>Δ</th></tr></thead>
+            <tbody id="mut-r-go-tbody"></tbody>
+          </table>
+        </div>
+
+      </div><!-- /#mut-results -->
+    </div><!-- /#mutate-panel -->
+  </div>
+
+  <!-- Controls -->
+  <div id="controls" style="display:none">
+    <div id="btn-group">
+      <button class="ctrl-btn" id="btn-prev" onclick="stepPrev()">◀ Prev</button>
+      <button class="ctrl-btn" id="btn-play" onclick="togglePlay()">▶ Play</button>
+      <button class="ctrl-btn" id="btn-next" onclick="stepNext()">Next ▶</button>
+      <button class="ctrl-btn" onclick="resetSim()">↺ Reset</button>
+    </div>
+    <div id="step-dots"></div>
+    <div id="tau-display">
+      <div class="tau-metric">τ:<span id="tau-val">—</span></div>
+      <div class="tau-metric">Top-1:<span id="top1-val">—</span></div>
+    </div>
+    <div id="temperature-group">
+      <span id="temperature-label">Temperature</span>
+      <input id="temperature-slider" type="range" min="0.1" max="3.0" step="0.1" value="1.0"
+             oninput="onTempChange(this.value)">
+      <span id="temperature-val">1.0</span>
+      <button class="ctrl-btn" onclick="rerunSim()">Rerun</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const IDENTITY_PALETTE = [
+  '#6366f1','#16a34a','#ea7522','#0891b2',
+  '#8b5cf6','#dc2626','#ca8a04','#2563eb',
+  '#059669','#d946ef','#65a30d','#e11d48',
+];
+
+const state = {
+  complexes: [],
+  currentPdb: null,
+  simulation: null,
+  currentStep: -1,
+  playing: false,
+  playTimer: null,
+  temperature: 1.0,
+  identityColorMap: new Map(),
+  stepAtSubunit: new Map(),
+  sparklineTaus: [],
+};
+
+function buildIdentityColorMap(sim) {
+  const seen = new Map();
+  let idx = 0;
+  for (const sub of sim.subunits) {
+    if (!seen.has(sub.uniprot)) {
+      seen.set(sub.uniprot, IDENTITY_PALETTE[idx % IDENTITY_PALETTE.length]);
+      idx++;
+    }
+  }
+  return seen;
+}
+
+function identityColor(uniprot) {
+  return state.identityColorMap.get(uniprot) || '#9ca3af';
+}
+
+function partialKendallTau(predPrefix, gtOrder) {
+  const k = predPrefix.length;
+  if (k <= 1) return 1.0;
+  const gtPos = predPrefix.map(idx => gtOrder.indexOf(idx));
+  let concordant = 0, discordant = 0;
+  for (let i = 0; i < k; i++) {
+    for (let j = i + 1; j < k; j++) {
+      const d = gtPos[j] - gtPos[i];
+      if (d > 0) concordant++;
+      else if (d < 0) discordant++;
+    }
+  }
+  const total = k * (k - 1) / 2;
+  return total > 0 ? (concordant - discordant) / total : 1.0;
+}
+
+function lerp(a, b, t) { return a + (b - a) * Math.max(0, Math.min(1, t)); }
+
+async function pollReady() {
+  try {
+    const r = await fetch('/status');
+    const s = await r.json();
+    const pf = s.protfunc_available ? ' · ProtFunc ✦' : '';
+    const scorer = s.scorer ? ` · ${s.scorer}` : '';
+    document.getElementById('status-text').textContent =
+      `ready · ${s.n_simulations} examples${pf}${scorer}`;
+    renderExamples();
+    startPlaceholder();
+  } catch {
+    setTimeout(pollReady, 3000);
+  }
+}
+
+// Example chips
+const EXAMPLE_COMPLEXES = [
+  {pdb_id:'2HHB', name:'Hemoglobin', n:4, type:'heteromer'},
+  {pdb_id:'1BRS', name:'Barnase/Barstar', n:6, type:'heteromer'},
+  {pdb_id:'2PTC', name:'Trypsin/BPTI', n:2, type:'heteromer'},
+  {pdb_id:'1AON', name:'GroEL', n:7, type:'homomer'},
+  {pdb_id:'1GRU', name:'GroES', n:7, type:'homomer'},
+  {pdb_id:'1AY7', name:'RNase SA', n:2, type:'heteromer'},
+  {pdb_id:'1A2K', name:'Ran/Importin-β', n:5, type:'heteromer'},
+  {pdb_id:'3GBN', name:'HA/Antibody', n:3, type:'heteromer'},
+  {pdb_id:'1DVQ', name:'Transthyretin', n:4, type:'homomer'},
+  {pdb_id:'1AXC', name:'PCNA', n:3, type:'homomer'},
+];
+
+function renderExamples() {
+  const wrap = document.getElementById('example-chips');
+  if (!wrap) return;
+  wrap.innerHTML = EXAMPLE_COMPLEXES.map(c => `
+    <button class="example-chip${state.currentPdb===c.pdb_id?' active':''}"
+            onclick="loadExample('${c.pdb_id}')" title="${c.name} · N=${c.n}">
+      <span>${c.pdb_id}</span>
+      <span class="chip-n">N${c.n}</span>
+    </button>`).join('');
+}
+
+async function loadExample(pdbId) {
+  document.querySelectorAll('.example-chip').forEach(c => c.classList.remove('active'));
+  document.querySelector(`.example-chip[onclick*="${pdbId}"]`)?.classList.add('active');
+  stopPlaceholder();
+  await selectComplex(pdbId);
+}
+
+async function loadPdbInput() {
+  const input = document.getElementById('pdb-input');
+  const statusEl = document.getElementById('pdb-load-status');
+  const btn = document.getElementById('pdb-load-btn');
+  const pdbId = (input?.value || '').trim().toUpperCase();
+  if (!pdbId || pdbId.length !== 4) {
+    if (statusEl) statusEl.textContent = '⚠ Enter a 4-character PDB ID';
+    return;
+  }
+  btn.disabled = true;
+  if (statusEl) statusEl.textContent = `⏳ Loading ${pdbId}…`;
+  stopPlaceholder();
+  try {
+    if (SIM_COMPLEXES.has(pdbId)) {
+      await selectComplex(pdbId);
+    } else {
+      await selectDynamic(pdbId);
+    }
+    if (statusEl) statusEl.textContent = '';
+  } catch(e) {
+    if (statusEl) statusEl.textContent = `⚠ Failed: ${e.message}`;
+  }
+  btn.disabled = false;
+}
+
+let _placeholderTimer = null;
+let _placeholderStep = 0;
+const _PH_N = 7;
+const _PH_COLORS = ['#6366f1','#8b5cf6','#0891b2','#16a34a','#ea7522','#dc2626','#ca8a04'];
+
+function _drawPlaceholder(step) {
+  const svg = document.getElementById('placeholder-svg');
+  if (!svg) return;
+  const cx = 129, cy = 124, R = 82;
+  const pts = Array.from({length: _PH_N}, (_, i) => {
+    const a = (2*Math.PI*i/_PH_N) - Math.PI/2;
+    return {x: cx + R*Math.cos(a), y: cy + R*Math.sin(a)};
+  });
+  const assembled = Array.from({length: step % (_PH_N+1)}, (_, i) => i);
+  const adding = assembled.length < _PH_N ? assembled.length : -1;
+  let html = '';
+  // Edges between assembled nodes
+  for (let i = 0; i < assembled.length; i++) {
+    for (let j = i+1; j < assembled.length; j++) {
+      const a = pts[assembled[i]], b = pts[assembled[j]];
+      html += `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#d1d5db" stroke-width="1.5" opacity="0.6"/>`;
+    }
+  }
+  // Forming bonds
+  if (adding >= 0) {
+    const b = pts[adding];
+    assembled.forEach(ai => {
+      const a = pts[ai];
+      html += `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#ca8a04" stroke-width="2" stroke-dasharray="4 3" opacity="0.6"/>`;
+    });
+  }
+  // Nodes
+  for (let i = 0; i < _PH_N; i++) {
+    const p = pts[i];
+    const isAssembled = assembled.includes(i) && i !== adding;
+    const isAdding = i === adding;
+    const isPending = !isAssembled && !isAdding;
+    const color = _PH_COLORS[i];
+    const r = 16;
+    if (isAdding) {
+      html += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r+5}" fill="${color}" opacity="0.12"/>`;
+    }
+    html += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" fill="${isPending?'#f3f4f6':color}" fill-opacity="${isAssembled?0.55:isAdding?0.88:1}" stroke="${isPending?'#d1d5db':color}" stroke-width="${isAdding?2.5:1.5}"/>`;
+    if (!isPending) {
+      html += `<text x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}" text-anchor="middle" dominant-baseline="middle" fill="white" font-size="11" font-weight="bold" font-family="Inter,sans-serif">${String.fromCharCode(65+i)}</text>`;
+    }
+  }
+  // Step counter
+  if (step % (_PH_N+1) > 0) {
+    html += `<text x="129" y="238" text-anchor="middle" fill="#9ca3af" font-size="10" font-family="Inter,sans-serif">step ${step % (_PH_N+1)} / ${_PH_N}</text>`;
+  }
+  svg.innerHTML = html;
+}
+
+function startPlaceholder() {
+  if (_placeholderTimer) return;
+  _placeholderStep = 0;
+  _drawPlaceholder(0);
+  _placeholderTimer = setInterval(() => {
+    _placeholderStep++;
+    _drawPlaceholder(_placeholderStep);
+    if (_placeholderStep % (_PH_N+2) === 0) _placeholderStep = 0;
+  }, 900);
+}
+
+function stopPlaceholder() {
+  if (_placeholderTimer) { clearInterval(_placeholderTimer); _placeholderTimer = null; }
+  const svg = document.getElementById('placeholder-svg');
+  if (svg) svg.innerHTML = '';
+}
+
+async function selectComplex(pdbId) {
+  state.currentPdb = pdbId;
+  state.currentStep = -1;
+  state.playing = false;
+  clearInterval(state.playTimer);
+  document.getElementById('btn-play').textContent = '▶ Play';
+  document.getElementById('btn-play').classList.remove('active');
+  stopPlaceholder();
+  renderExamples();
+
+  const r = await fetch(`/complex/${pdbId}?temperature=${state.temperature}`);
+  if (!r.ok) {
+    document.getElementById('info-panel').innerHTML = `<div style="color:var(--red);padding:24px">Error loading ${pdbId}</div>`;
+    return;
+  }
+  state.simulation = await r.json();
+  const sim = state.simulation;
+  state.currentStep = 0;
+
+  state.identityColorMap = buildIdentityColorMap(sim);
+  const stepAtSubunit = new Map();
+  sim.pred_order.forEach((subIdx, k) => stepAtSubunit.set(subIdx, k + 1));
+  state.stepAtSubunit = stepAtSubunit;
+
+  const sparklineTaus = [];
+  if (sim.gt_order) {
+    for (let k = 0; k < sim.n_subunits; k++) {
+      sparklineTaus.push(partialKendallTau(sim.pred_order.slice(0, k + 1), sim.gt_order));
+    }
+  }
+  state.sparklineTaus = sparklineTaus;
+
+  document.getElementById('graph-panel').style.display = 'flex';
+  document.getElementById('controls').style.display = 'flex';
+  document.getElementById('empty-state')?.remove();
+  document.getElementById('graph-title').textContent = sim.name;
+  document.getElementById('graph-pdb').textContent = pdbId;
+  document.getElementById('tau-val').textContent  = sim.tau      != null ? sim.tau.toFixed(4)                   : '—';
+  document.getElementById('top1-val').textContent = sim.top1_acc != null ? (sim.top1_acc * 100).toFixed(1) + '%': '—';
+
+  const gp = document.getElementById('graph-panel');
+  gp.classList.toggle('tau-perfect', sim.tau != null && Math.abs(sim.tau - 1.0) < 1e-6);
+  renderStepDots();
+  renderStep(0);
+}
+
+function renderStep(stepIdx) {
+  state.currentStep = stepIdx;
+  const sim = state.simulation;
+  const step = sim.steps[stepIdx];
+  const N = sim.n_subunits;
+  const assembledSet = new Set(sim.steps.slice(0, stepIdx).map(s => s.chosen.idx));
+  const addingIdx = step.chosen.idx;
+  renderGraph(sim, assembledSet, addingIdx, step);
+  renderTimeline(sim, stepIdx);
+  renderStepInfo(sim, step, stepIdx, assembledSet);
+  renderInfoPanel(sim, step, assembledSet, stepIdx);
+  updateStepDots(stepIdx);
+  document.getElementById('btn-prev').disabled = stepIdx === 0;
+  document.getElementById('btn-next').disabled = stepIdx === N - 1;
+}
+
+function nodeRadius(sub) {
+  return Math.min(26, Math.max(11, 10 + Math.sqrt(sub.seq_len || 100) * 0.55));
+}
+
+function renderGraph(sim, assembledSet, addingIdx, step) {
+  const svg = document.getElementById('graph-svg');
+  const N = sim.n_subunits;
+  const cx = 129, cy = 129;
+  const maxR = Math.max(...sim.subunits.map(s => nodeRadius(s)));
+  const R = Math.max(48, 129 - maxR - 20);
+  svg.innerHTML = '';
+
+  const positions = [];
+  for (let i = 0; i < N; i++) {
+    const angle = (2 * Math.PI * i / N) - Math.PI / 2;
+    positions.push({ x: cx + R * Math.cos(angle), y: cy + R * Math.sin(angle) });
+  }
+
+  const assembled = Array.from(assembledSet);
+
+  // Assembled edges
+  for (let i = 0; i < assembled.length; i++) {
+    for (let j = i + 1; j < assembled.length; j++) {
+      const a = positions[assembled[i]], b = positions[assembled[j]];
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', a.x); line.setAttribute('y1', a.y);
+      line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
+      line.setAttribute('stroke', '#d1d5db');
+      line.setAttribute('stroke-width', '1.5');
+      line.setAttribute('stroke-opacity', '0.7');
+      svg.appendChild(line);
+    }
+  }
+
+  // Forming bonds. When PPI has no data for this complex, fall back to a fixed
+  // mid opacity rather than letting a placeholder value modulate the drawing —
+  // otherwise the bond thickness reads as PPI evidence that does not exist.
+  const ppiAvail = step && step.chosen.available ? step.chosen.available.ppi !== false : true;
+  const ppiScore = (step && ppiAvail && typeof step.chosen.scores.ppi === 'number')
+    ? Math.max(0, Math.min(1, step.chosen.scores.ppi)) : 0.5;
+  const bondOpacity = lerp(0.3, 0.9, ppiScore).toFixed(2);
+  const bondWidth = (1 + 1.5 * ppiScore).toFixed(2);
+
+  for (const ai of assembled) {
+    const a = positions[ai], b = positions[addingIdx];
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', a.x); line.setAttribute('y1', a.y);
+    line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
+    line.setAttribute('stroke', '#ca8a04');
+    line.setAttribute('stroke-width', bondWidth);
+    line.setAttribute('stroke-dasharray', '4 3');
+    line.setAttribute('stroke-opacity', bondOpacity);
+    svg.appendChild(line);
+  }
+
+  // Draw nodes
+  for (let i = 0; i < N; i++) {
+    const pos = positions[i];
+    const sub = sim.subunits[i];
+    const isAssembled = assembledSet.has(i);
+    const isAdding = i === addingIdx;
+    const isPending = !isAssembled && !isAdding;
+    const r = nodeRadius(sub);
+    const idColor = identityColor(sub.uniprot);
+
+    if (isAdding) {
+      const glow = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      glow.setAttribute('cx', pos.x); glow.setAttribute('cy', pos.y);
+      glow.setAttribute('r', r + 7);
+      glow.setAttribute('fill', `${idColor}18`);
+      glow.setAttribute('stroke', `${idColor}30`);
+      glow.setAttribute('stroke-width', '1');
+      svg.appendChild(glow);
+    }
+
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', pos.x); circle.setAttribute('cy', pos.y);
+    circle.setAttribute('r', r);
+
+    if (isAdding) {
+      circle.setAttribute('fill', '#fefce8');
+      circle.setAttribute('stroke', idColor);
+      circle.setAttribute('stroke-width', '2.5');
+    } else if (isAssembled) {
+      circle.setAttribute('fill', '#f0fdf4');
+      circle.setAttribute('stroke', idColor);
+      circle.setAttribute('stroke-width', '2');
+    } else {
+      circle.setAttribute('fill', '#f9fafb');
+      circle.setAttribute('stroke', '#d1d5db');
+      circle.setAttribute('stroke-width', '1.5');
+    }
+    svg.appendChild(circle);
+
+    if (!isPending) {
+      const stepNum = state.stepAtSubunit.get(i);
+      const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      badge.setAttribute('x', pos.x); badge.setAttribute('y', pos.y + 1);
+      badge.setAttribute('text-anchor', 'middle');
+      badge.setAttribute('dominant-baseline', 'middle');
+      badge.setAttribute('font-size', r < 15 ? '7' : '9');
+      badge.setAttribute('font-weight', '700');
+      badge.setAttribute('fill', isAdding ? '#854d0e' : '#166534');
+      badge.textContent = stepNum;
+      svg.appendChild(badge);
+    }
+
+    const nameLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    nameLabel.setAttribute('x', pos.x);
+    nameLabel.setAttribute('y', pos.y + r + 11);
+    nameLabel.setAttribute('text-anchor', 'middle');
+    nameLabel.setAttribute('font-size', '7.5');
+    nameLabel.setAttribute('fill', isPending ? '#d1d5db' : (isAdding ? '#92400e80' : `${idColor}99`));
+    nameLabel.textContent = (sub.name || sub.chain || '?').slice(0, 8);
+    svg.appendChild(nameLabel);
+
+    if (isPending) {
+      const chainTxt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      chainTxt.setAttribute('x', pos.x); chainTxt.setAttribute('y', pos.y + 1);
+      chainTxt.setAttribute('text-anchor', 'middle');
+      chainTxt.setAttribute('dominant-baseline', 'middle');
+      chainTxt.setAttribute('font-size', '9');
+      chainTxt.setAttribute('fill', '#9ca3af');
+      chainTxt.textContent = sub.chain;
+      svg.appendChild(chainTxt);
+    }
+  }
+
+  if (sim.is_ring) {
+    const ringtxt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    ringtxt.setAttribute('x', cx); ringtxt.setAttribute('y', cy + 5);
+    ringtxt.setAttribute('text-anchor', 'middle');
+    ringtxt.setAttribute('font-size', '10');
+    ringtxt.setAttribute('fill', '#6366f1');
+    ringtxt.textContent = '⬡ ring';
+    svg.appendChild(ringtxt);
+  }
+}
+
+function renderTimeline(sim, stepIdx) {
+  const container = document.getElementById('timeline-chips');
+  if (!container) return;
+
+  const chips = sim.pred_order.map((subIdx, k) => {
+    const sub = sim.subunits[subIdx];
+    const color = identityColor(sub.uniprot);
+    const isDone = k < stepIdx, isCurrent = k === stepIdx;
+    const cls = isDone ? 'tl-chip tl-done' : isCurrent ? 'tl-chip tl-current' : 'tl-chip tl-pending';
+    const score = sim.steps[k].chosen.scores.combined;
+    const name = (sub.name || sub.chain || '?').slice(0, 7);
+    return `<div class="${cls}" onclick="renderStep(${k})" title="${sub.name}: combined=${score.toFixed(3)}">
+      <span class="tl-dot" style="background:${color}"></span>
+      <span style="font-size:9px;font-family:'JetBrains Mono',monospace">${k + 1}</span>
+      <span style="font-size:10px">${name}</span>
+      ${isCurrent ? `<span style="font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--text-muted)">${score.toFixed(2)}</span>` : ''}
+    </div>`;
+  });
+  container.innerHTML = chips.join('');
+}
+
+function renderStepInfo(sim, step, stepIdx, assembledSet) {
+  const sub = sim.subunits[step.chosen.idx];
+  const scores = step.chosen.scores;
+  document.getElementById('step-info').innerHTML = `
+    <strong>Step ${stepIdx + 1} / ${sim.n_subunits}</strong><br>
+    Adding: <strong style="color:${identityColor(sub.uniprot)}">${sub.name}</strong> (chain ${sub.chain})<br>
+    UniProt: <a href="https://www.uniprot.org/uniprot/${sub.uniprot}" target="_blank">${sub.uniprot}</a><br>
+    Score: <strong style="color:var(--green);font-family:'JetBrains Mono',monospace">${scores.combined.toFixed(4)}</strong>
+    · Conf: <strong style="font-family:'JetBrains Mono',monospace">${(step.chosen_prob * 100).toFixed(1)}%</strong>
+  `;
+}
+
+function renderInfoPanel(sim, step, assembledSet, stepIdx) {
+  const panel = document.getElementById('info-panel');
+  const chosen = step.chosen;
+  const sub = sim.subunits[chosen.idx];
+  const scores = chosen.scores;
+  const weighted = chosen.weighted;
+  // Older payloads have no `available` block; treat those as "assume present"
+  // so this stays backwards compatible with cached simulations.
+  const avail = chosen.available || {};
+  const rejected = step.candidates.filter(c => c.idx !== chosen.idx);
+  const runnerUp = rejected[0];
+
+  panel.innerHTML = `
+    <div class="info-section">
+      <h3>Metrics</h3>
+      <div class="metrics-grid">
+        <div class="metric-card" style="grid-column:1/-1">
+          <div class="metric-card-label">τ sparkline — partial Kendall τ per step</div>
+          <div class="sparkline-container">${tauSparkline(state.sparklineTaus, stepIdx)}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-card-label">Score profile — winner vs runner-up</div>
+          <div class="radar-container">${radarChart(scores, runnerUp ? runnerUp.scores : null)}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-card-label">Confidence</div>
+          ${confBar(step.chosen_prob, runnerUp ? (step.chosen_prob - (step.candidates.find(c=>c.idx===runnerUp.idx)?.prob??0)) : step.chosen_prob)}
+        </div>
+      </div>
+    </div>
+
+    <div class="info-section">
+      <h3>Score breakdown — ${sub.name}</h3>
+      ${scoreBar('SASA', scores.sasa, weighted.sasa, 'var(--sasa-color)', avail.sasa)}
+      ${scoreBar('ESM',  scores.esm,  weighted.esm,  'var(--esm-color)',  avail.esm)}
+      ${scoreBar('GO',   scores.go,   weighted.go,   'var(--go-color)',   avail.go)}
+      ${scoreBar('PPI',  scores.ppi,  weighted.ppi,  'var(--ppi-color)',  avail.ppi)}
+      ${scoreExplainer(sim)}
+      <div class="score-row" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+        <span class="score-label" style="color:var(--text)">Total</span>
+        <div class="score-bar-track">
+          <div class="score-bar-fill" style="width:${(scores.combined*100).toFixed(1)}%;background:linear-gradient(90deg,var(--accent),var(--accent-2))"></div>
+        </div>
+        <span class="score-val" style="color:var(--accent);font-weight:700">${scores.combined.toFixed(4)}</span>
+      </div>
+    </div>
+
+    <div class="info-section">
+      <h3>GO terms — ${sub.name}${state.simulation.protfunc_used ? '<span class="protfunc-badge">✦ ProtFunc</span>' : ''}</h3>
+      ${goTermsSection(chosen)}
+    </div>
+
+    <div class="info-section">
+      <h3>Functional context</h3>
+      <div id="func-context">${functionalContext(sim, step, chosen, sub)}</div>
+    </div>
+
+    ${rejected.length > 0 ? `
+    <div class="info-section">
+      <h3>Rejected candidates (${rejected.length})</h3>
+      <table id="rejected-table">
+        <thead><tr>
+          <th>Chain</th><th>Name</th><th>Score</th><th>SASA</th><th>ESM</th><th>GO</th><th>PPI</th>
+        </tr></thead>
+        <tbody>
+          ${rejected.map(c => `
+            <tr>
+              <td style="font-family:'JetBrains Mono',monospace;font-weight:600;color:${identityColor(sim.subunits[c.idx]?.uniprot||'')}">${c.chain}</td>
+              <td>${c.name}</td>
+              <td>
+                <div class="mini-bar-track"><div class="mini-bar-fill" style="width:${(c.scores.combined*100).toFixed(1)}%;background:var(--text-muted)"></div></div>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:10px;margin-left:5px">${c.scores.combined.toFixed(3)}</span>
+              </td>
+              <td>${miniBar(c.scores.sasa,'var(--sasa-color)',(c.available||{}).sasa)}</td>
+              <td>${miniBar(c.scores.esm,'var(--esm-color)',(c.available||{}).esm)}</td>
+              <td>${miniBar(c.scores.go,'var(--go-color)',(c.available||{}).go)}</td>
+              <td>${miniBar(c.scores.ppi,'var(--ppi-color)',(c.available||{}).ppi)}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : ''}
+  `;
+}
+
+function tauSparkline(taus, currentStep) {
+  if (!taus || taus.length === 0) return '<div style="color:var(--text-muted);font-size:11px;padding:4px">No ground-truth order available</div>';
+  const W = 200, H = 52, padX = 8, padY = 6;
+  const N = taus.length;
+  const xScale = N > 1 ? (W - 2*padX)/(N-1) : 0;
+  const yRange = H - 2*padY;
+
+  function toXY(i, v) {
+    return [padX + i*xScale, H - padY - ((v+1)/2)*yRange];
+  }
+
+  const midY = H - padY - 0.5*yRange;
+  const allPts  = taus.map((v,i)=>toXY(i,v).join(',')).join(' ');
+  const donePts = taus.slice(0,currentStep+1).map((v,i)=>toXY(i,v).join(',')).join(' ');
+  const [dotX,dotY] = toXY(currentStep, taus[currentStep]??1.0);
+  const curTau = taus[currentStep]??1.0;
+  const tauColor = curTau>=0.8?'#16a34a':curTau>=0.4?'#ea7522':'#dc2626';
+
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;overflow:visible">
+    <line x1="${padX}" y1="${midY.toFixed(1)}" x2="${W-padX}" y2="${midY.toFixed(1)}"
+      stroke="#e5e7eb" stroke-width="0.8" stroke-dasharray="2 2"/>
+    <polyline points="${allPts}" fill="none" stroke="#e5e7eb" stroke-width="1.2"/>
+    ${donePts.includes(',') ? `<polyline points="${donePts}" fill="none" stroke="#6366f1" stroke-width="2"/>` : ''}
+    <circle cx="${dotX.toFixed(1)}" cy="${dotY.toFixed(1)}" r="3.5" fill="${tauColor}" stroke="#fff" stroke-width="1.5"/>
+    <text x="${dotX.toFixed(1)}" y="${(dotY-8).toFixed(1)}" font-size="9" fill="${tauColor}" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-weight="600">τ=${curTau.toFixed(2)}</text>
+    <text x="${padX}" y="${H}" font-size="8" fill="#d1d5db">1</text>
+    <text x="${(W-padX).toFixed(1)}" y="${H}" font-size="8" fill="#d1d5db" text-anchor="end">${N}</text>
+  </svg>`;
+}
+
+function polarXY(angleDeg, r, cx, cy) {
+  const rad = angleDeg * Math.PI / 180;
+  return [cx + r*Math.cos(rad), cy + r*Math.sin(rad)];
+}
+
+function radarChart(winnerScores, runnerUpScores) {
+  const cx=55, cy=55, maxR=40;
+  const terms = [
+    {key:'sasa',label:'SASA',angle:270},
+    {key:'esm', label:'ESM', angle:0  },
+    {key:'ppi', label:'PPI', angle:90 },
+    {key:'go',  label:'GO',  angle:180},
+  ];
+  function polyPts(scores) {
+    return terms.map(t => {
+      const v = Math.max(0,Math.min(1,scores[t.key]||0));
+      const [x,y] = polarXY(t.angle,v*maxR,cx,cy);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+  }
+  const grids = [0.25,0.5,0.75,1.0].map(f => {
+    const pts = terms.map(t=>{const[x,y]=polarXY(t.angle,maxR*f,cx,cy);return`${x.toFixed(1)},${y.toFixed(1)}`;}).join(' ');
+    return `<polygon points="${pts}" fill="none" stroke="#e5e7eb" stroke-width="0.7"/>`;
+  });
+  const axisLines = terms.map(t=>{const[x2,y2]=polarXY(t.angle,maxR,cx,cy);return`<line x1="${cx}" y1="${cy}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#e5e7eb" stroke-width="0.6"/>`;});
+  const labels = terms.map(t=>{const[lx,ly]=polarXY(t.angle,maxR+11,cx,cy);return`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" dominant-baseline="middle" font-size="7.5" fill="#9ca3af">${t.label}</text>`;});
+
+  const winnerPoly = `<polygon points="${polyPts(winnerScores)}" fill="rgba(99,102,241,0.12)" stroke="#6366f1" stroke-width="1.5"/>`;
+  const runnerPoly = runnerUpScores
+    ? `<polygon points="${polyPts(runnerUpScores)}" fill="none" stroke="#dc2626" stroke-width="1" stroke-dasharray="2.5 1.5" opacity="0.7"/>`
+    : '';
+
+  return `<svg viewBox="0 0 110 110" width="110" height="110">
+    ${grids.join('')}${axisLines.join('')}${winnerPoly}${runnerPoly}${labels.join('')}
+  </svg>`;
+}
+
+function confBar(prob, delta) {
+  const pct = Math.max(0,Math.min(1,prob));
+  const filled = Math.round(pct*16);
+  const bar = '█'.repeat(filled)+'░'.repeat(16-filled);
+  const deltaStr = delta!=null&&isFinite(delta)
+    ? `<div class="conf-delta">+${(delta*100).toFixed(1)}% over runner-up</div>` : '';
+  return `
+    <div class="conf-bar-text">${bar}</div>
+    <div style="font-size:14px;color:var(--green);margin-top:4px;font-weight:700;font-family:'JetBrains Mono',monospace">${(pct*100).toFixed(1)}%</div>
+    ${deltaStr}`;
+}
+
+function goPill(term, predicted=false, prob=null) {
+  const cat = term[0]||'U';
+  const display = term.length>48?term.slice(0,48)+'…':term;
+  const title = predicted&&prob!=null?`${term} (ProtFunc, p=${prob.toFixed(3)})`:term;
+  return `<span class="go-pill ${cat}${predicted?' predicted':''}" title="${title}">${display}</span>`;
+}
+
+function goTermsSection(candidate) {
+  const known = candidate.go_terms_known||[], predicted = candidate.go_terms_predicted||[];
+  if (!known.length&&!predicted.length) return '<div id="go-pills"><span style="color:var(--text-muted);font-size:11px">No GO terms available</span></div>';
+  const sourceLine = `<div class="go-source-line"><span>${known.length}</span> experimental · <span>${predicted.length}</span> predicted</div>`;
+  const knownPills = known.map(t=>goPill(t,false)).join('');
+  const predPills  = predicted.map(p=>goPill(p.term,true,p.prob)).join('');
+  let html = sourceLine+'<div id="go-pills">'+knownPills;
+  if (predPills) html += `<div class="go-divider">predicted</div>`+predPills;
+  html += '</div>';
+  return html;
+}
+
+// available===false means no data stood behind this channel for this complex.
+// It used to be reported as a flat 0.5, which drew a half-full bar and read as
+// a genuine mid-range score. Render it as an explicit gap instead.
+function scoreBar(label, raw, weighted, color, available) {
+  if (available === false) {
+    return `
+    <div class="score-row score-row-nodata">
+      <span class="score-label">${label}</span>
+      <div class="score-bar-track"><div class="score-bar-nodata"></div></div>
+      <span class="score-val" title="No data behind this channel for this complex — not a score of 0.5">no data</span>
+    </div>`;
+  }
+  const w = Math.max(0, Math.min(1, raw));
+  return `
+    <div class="score-row">
+      <span class="score-label">${label}</span>
+      <div class="score-bar-track">
+        <div class="score-bar-fill" style="width:${(w*100).toFixed(1)}%;background:${color}"></div>
+      </div>
+      <span class="score-val">${raw.toFixed(3)} <span style="color:var(--text-dim);font-size:9px">×${weighted.toFixed(3)}</span></span>
+    </div>`;
+}
+
+function miniBar(val, color, available) {
+  if (available === false) return `<div class="mini-bar-track"><div class="mini-bar-nodata"></div></div>`;
+  const w = Math.max(0, Math.min(1, val));
+  return `<div class="mini-bar-track"><div class="mini-bar-fill" style="width:${(w*100).toFixed(1)}%;background:${color}"></div></div>`;
+}
+
+// The ×N figure next to each bar means different things for the two scorers,
+// and conflating them is how "the GNN weights GO at 0.5" got believed.
+function scoreExplainer(sim) {
+  const isGnn = sim && sim.scorer === 'gnn';
+  const txt = isGnn
+    ? '×N = occlusion attribution: how far the GNN score moves when that channel is neutralised. It is not a fixed weight — the GNN has no linear decomposition.'
+    : '×N = the fixed weight this channel carries in the linear scorer (SASA .40 / ESM .35 / GO .15 / PPI .10).';
+  return `<div class="score-explainer">${txt}</div>`;
+}
+
+function functionalContext(sim, step, chosen, sub) {
+  const stepIdx=step.step, N=sim.n_subunits;
+  const isFirst=stepIdx===0, isLast=stepIdx===N-1, isHomomer=step.is_homomer_step;
+  const termNames={sasa:'surface area (SASA)',esm:'sequence similarity (ESM-2)',go:'GO functional coherence',ppi:'PPI interaction confidence'};
+  const termColors={sasa:'var(--sasa-color)',esm:'var(--esm-color)',go:'var(--go-color)',ppi:'var(--ppi-color)'};
+  const weightedEntries = Object.entries(chosen.weighted).sort((a,b)=>b[1]-a[1]);
+  const dominant=weightedEntries[0], runner=weightedEntries[1];
+  const rejected=step.candidates.filter(c=>c.idx!==chosen.idx);
+  const nextBest=rejected[0];
+  const gap=nextBest?(chosen.scores.combined-nextBest.scores.combined):0;
+
+  const correctTag = step.correct==null
+    ? `<span style="color:var(--text-muted)">no ground-truth order available</span>`
+    : step.correct
+    ? `<span class="step-correct">✓ matches ground truth</span>`
+    : `<span class="step-wrong">✗ differs from ground truth${step.gt_candidate?` (GT: <strong>${step.gt_candidate.name}</strong>)`:''}</span>`;
+
+  const spread=step.score_spread;
+  const tiedMsg=spread<0.005?`<br><em style="color:var(--text-muted);font-size:11px">Note: candidates nearly tied (spread=${spread.toFixed(4)}).</em>`:'';
+
+  let msg='';
+  if (isFirst) {
+    if (isHomomer) {
+      msg=`All ${N} chains are identical — any subunit is an equally valid seed. <strong>${sub.name}</strong> is arbitrarily designated as the nucleation starting point.`;
+    } else {
+      const totalLen=sim.subunits.reduce((s,u)=>s+u.seq_len,0);
+      const seqFrac=(sub.seq_len/totalLen*100).toFixed(1);
+      msg=`<strong>${sub.name}</strong> (${sub.seq_len} aa, ${seqFrac}% of complex mass) selected as nucleation seed. At step 0, ESM and GO default to 0.5. <strong style="color:${termColors[dominant[0]]}">${termNames[dominant[0]]}</strong> (${dominant[1].toFixed(3)}) is the primary differentiator.`;
+      if (nextBest) msg+=` Runner-up: <strong>${nextBest.name}</strong> (combined ${nextBest.scores.combined.toFixed(4)}).`;
+    }
+  } else if (isLast) {
+    msg=`<strong>${sub.name}</strong> fills the final position (score ${chosen.scores.combined.toFixed(4)}). `;
+    if (sim.is_ring) msg+=`Ring complete — τ evaluated over all ${2*N} cyclic rotations. `;
+    else msg+=`All other subunits already placed. `;
+    msg+=`Primary driver: <strong style="color:${termColors[dominant[0]]}">${termNames[dominant[0]]}</strong>.`;
+  } else {
+    const driverStrong=dominant[1]>runner[1]*1.5;
+    msg=`<strong>${sub.name}</strong> joins at step ${stepIdx+1}. `;
+    if (driverStrong) {
+      msg+=`<strong style="color:${termColors[dominant[0]]}">${termNames[dominant[0]]}</strong> (${dominant[1].toFixed(3)}) clearly dominates. `;
+    } else {
+      msg+=`Decision balanced: <strong style="color:${termColors[dominant[0]]}">${termNames[dominant[0]]}</strong> (${dominant[1].toFixed(3)}) and <strong style="color:${termColors[runner[0]]}">${termNames[runner[0]]}</strong> (${runner[1].toFixed(3)}) contribute roughly equally. `;
+    }
+    if (nextBest) {
+      if (gap<0.01) msg+=`Margin over <strong>${nextBest.name}</strong> is very small (${gap.toFixed(4)}) — nearly a tie. `;
+      else msg+=`Scores <strong>${gap.toFixed(4)}</strong> above <strong>${nextBest.name}</strong> (${nextBest.scores.combined.toFixed(4)}). `;
+    }
+  }
+
+  msg+=`<br><span style="font-size:11px">${correctTag}</span>`;
+  msg+=tiedMsg;
+  return msg;
+}
+
+function renderStepDots() {
+  const container=document.getElementById('step-dots');
+  container.innerHTML='';
+  for (let i=0;i<state.simulation.n_subunits;i++) {
+    const dot=document.createElement('div');
+    dot.className='step-dot'; dot.title=`Step ${i+1}`; dot.onclick=()=>renderStep(i);
+    container.appendChild(dot);
+  }
+}
+
+function updateStepDots(currentIdx) {
+  document.querySelectorAll('.step-dot').forEach((dot,i)=>{
+    dot.className='step-dot'+(i<currentIdx?' done':(i===currentIdx?' current':''));
+  });
+}
+
+function stepPrev() { if(state.currentStep>0)renderStep(state.currentStep-1); }
+function stepNext() { if(state.currentStep<state.simulation.n_subunits-1)renderStep(state.currentStep+1); }
+
+function togglePlay() {
+  state.playing=!state.playing;
+  const btn=document.getElementById('btn-play');
+  if (state.playing) {
+    btn.textContent='⏸ Pause'; btn.classList.add('active');
+    state.playTimer=setInterval(()=>{
+      if (state.currentStep<state.simulation.n_subunits-1) renderStep(state.currentStep+1);
+      else { state.playing=false; btn.textContent='▶ Play'; btn.classList.remove('active'); clearInterval(state.playTimer); }
+    },1200);
+  } else { btn.textContent='▶ Play'; btn.classList.remove('active'); clearInterval(state.playTimer); }
+}
+
+function resetSim() {
+  state.playing=false; clearInterval(state.playTimer);
+  document.getElementById('btn-play').textContent='▶ Play';
+  document.getElementById('btn-play').classList.remove('active');
+  renderStep(0);
+}
+
+function onTempChange(val) {
+  state.temperature=parseFloat(val);
+  document.getElementById('temperature-val').textContent=parseFloat(val).toFixed(1);
+}
+
+async function rerunSim() {
+  if (!state.currentPdb) return;
+  state.playing=false; clearInterval(state.playTimer);
+  document.getElementById('btn-play').textContent='▶ Play';
+  document.getElementById('btn-play').classList.remove('active');
+  const r=await fetch(`/complex/${state.currentPdb}?temperature=${state.temperature}`);
+  if (!r.ok) return;
+  state.simulation=await r.json();
+  const sim=state.simulation;
+  state.currentStep=0;
+  state.identityColorMap=buildIdentityColorMap(sim);
+  const stepAtSubunit=new Map();
+  sim.pred_order.forEach((subIdx,k)=>stepAtSubunit.set(subIdx,k+1));
+  state.stepAtSubunit=stepAtSubunit;
+  const sparklineTaus=[];
+  if (sim.gt_order) {
+    for (let k=0;k<sim.n_subunits;k++) sparklineTaus.push(partialKendallTau(sim.pred_order.slice(0,k+1),sim.gt_order));
+  }
+  state.sparklineTaus=sparklineTaus;
+  document.getElementById('tau-val').textContent=sim.tau!=null?sim.tau.toFixed(4):'—';
+  document.getElementById('top1-val').textContent=sim.top1_acc!=null?(sim.top1_acc*100).toFixed(1)+'%':'—';
+  document.getElementById('graph-panel').classList.toggle('tau-perfect',sim.tau!=null&&Math.abs(sim.tau-1.0)<1e-6);
+  renderStepDots(); renderStep(0);
+}
+
+function copyCitation() {
+  const citation=`@software{PRISM2026,
+  title  = {PRISM: Protein Ranking by Interface and Sequence Modeling},
+  author = {Bhat, Siddhant},
+  year   = {2026},
+  note   = {GNN-guided protein complex assembly order prediction},
+  url    = {https://github.com/SBhat2026/protein-assembly-sim}
+}`;
+  navigator.clipboard.writeText(citation).then(()=>{
+    const btn=document.getElementById('cite-btn');
+    btn.textContent='✓ Copied!'; btn.classList.add('copied');
+    setTimeout(()=>{btn.textContent='Copy citation';btn.classList.remove('copied');},2000);
+  });
+}
+
+document.addEventListener('keydown',(e)=>{
+  if (!state.simulation) return;
+  if (e.key==='ArrowRight') stepNext();
+  if (e.key==='ArrowLeft') stepPrev();
+  if (e.key===' '){e.preventDefault();togglePlay();}
+});
+
+function switchTab(tab) {
+  ['sim','browse','mutate','about'].forEach(t=>document.getElementById('tab-'+t).classList.toggle('active',t===tab));
+  document.getElementById('about-panel').style.display   = tab==='about'   ? 'flex':'none';
+  document.getElementById('browse-panel').style.display  = tab==='browse'  ? 'flex':'none';
+  document.getElementById('mutate-panel').style.display  = tab==='mutate'  ? 'flex':'none';
+
+  const sidebar=document.getElementById('sidebar');
+  sidebar.classList.toggle('collapsed',tab!=='sim');
+
+  const graphPanel=document.getElementById('graph-panel');
+  const infoPanel =document.getElementById('info-panel');
+  const controls  =document.getElementById('controls');
+  const simActive=tab==='sim';
+
+  if (simActive) {
+    if (state.simulation) graphPanel.style.display='flex';
+    infoPanel.style.display='flex';
+    if (state.simulation) controls.style.display='flex';
+  } else {
+    graphPanel.style.display='none';
+    infoPanel.style.display='none';
+    controls.style.display='none';
+  }
+
+  if (tab==='browse'&&!browseState.loaded) browseSearch();
+  if (tab==='mutate') initMutTab();
+}
+
+const browseState={offset:0,limit:100,total:0,loaded:false,_all:null,_filtered:[]};
+let _browseDebTimer=null;
+
+function browseDebounce(){clearTimeout(_browseDebTimer);_browseDebTimer=setTimeout(browseSearch,220);}
+
+async function _loadCorpus(){
+  if(browseState._all) return browseState._all;
+  try{
+    const r=await fetch('/static/corpus.json');
+    browseState._all=await r.json();
+  }catch(e){browseState._all=[];}
+  return browseState._all;
+}
+
+async function browseSearch(){browseState.offset=0;await _browseLoad();}
+function browsePage(dir){browseState.offset=Math.max(0,browseState.offset+dir*browseState.limit);_browseRenderPage();}
+
+function browseReset(){
+  document.getElementById('browse-query').value='';
+  document.getElementById('browse-source').value='all';
+  document.getElementById('browse-tier').value='all';
+  document.getElementById('browse-type').value='all';
+  document.getElementById('browse-nmin').value='2';
+  document.getElementById('browse-nmax').value='60';
+  document.getElementById('browse-sort').value='pdb_id';
+  document.getElementById('browse-reset-btn').style.display='none';
+  browseSearch();
+}
+
+async function _browseLoad(){
+  const all=await _loadCorpus();
+  const q=(document.getElementById('browse-query').value||'').trim().toUpperCase();
+  const src=document.getElementById('browse-source').value;
+  const tierVal=document.getElementById('browse-tier').value;
+  const typeVal=document.getElementById('browse-type').value;
+  const nmin=parseInt(document.getElementById('browse-nmin').value)||2;
+  const nmax=parseInt(document.getElementById('browse-nmax').value)||60;
+  const sortVal=document.getElementById('browse-sort').value;
+
+  const anyFilter=q||src!=='all'||tierVal!=='all'||typeVal!=='all'||nmin>2||nmax<60;
+  document.getElementById('browse-reset-btn').style.display=anyFilter?'':'none';
+
+  let rows=all.filter(r=>{
+    if(q&&!r.pdb_id.includes(q)) return false;
+    if(src!=='all'&&r.source!==src) return false;
+    if(tierVal!=='all'&&!r.gt_tier.includes(tierVal)) return false;
+    if(typeVal!=='all'&&r.type!==typeVal) return false;
+    if(r.n_subunits<nmin||r.n_subunits>nmax) return false;
+    return true;
+  });
+
+  if(sortVal==='n_asc') rows.sort((a,b)=>a.n_subunits-b.n_subunits);
+  else if(sortVal==='n_desc') rows.sort((a,b)=>b.n_subunits-a.n_subunits);
+  else if(sortVal==='tier') rows.sort((a,b)=>a.gt_tier.localeCompare(b.gt_tier));
+  else rows.sort((a,b)=>a.pdb_id.localeCompare(b.pdb_id));
+
+  browseState._filtered=rows;
+  browseState.total=rows.length;
+  browseState.loaded=true;
+  _browseRenderPage();
+}
+
+function _browseRenderPage(){
+  const rows=browseState._filtered;
+  const start=browseState.offset;
+  const end=Math.min(start+browseState.limit,rows.length);
+  const page=rows.slice(start,end);
+  const emptyEl=document.getElementById('browse-empty');
+  const tableWrap=document.getElementById('browse-table-wrap');
+  if(page.length===0){
+    tableWrap.style.display='none';
+    emptyEl.style.display='block';
+    document.getElementById('browse-stats').textContent='No complexes match your filters.';
+    document.getElementById('browse-pagination').style.display='none';
+  }else{
+    tableWrap.style.display='';
+    emptyEl.style.display='none';
+    document.getElementById('browse-pagination').style.display='';
+    const total=rows.length;
+    document.getElementById('browse-stats').textContent=`${total.toLocaleString()} complexes found — showing ${start+1}–${end}`;
+    document.getElementById('browse-page-info').textContent=`${start+1}–${end} of ${total.toLocaleString()}`;
+    document.getElementById('browse-prev').disabled=start===0;
+    document.getElementById('browse-next').disabled=end>=total;
+    _renderBrowse(page);
+  }
+}
+
+function _renderBrowse(rows){
+  const tbody=document.getElementById('browse-tbody');
+  const tierMap={'★ T1':'tier-t1','◆ T2':'tier-t2','◇ T3':'tier-t3'};
+  tbody.innerHTML=rows.map(r=>`
+    <tr onclick="browseSelect('${r.pdb_id}')">
+      <td><code>${r.pdb_id||'—'}</code></td>
+      <td>${r.n_subunits}</td>
+      <td>${r.type||'—'}</td>
+      <td><span class="tier-badge ${tierMap[r.gt_tier]||''}">${r.gt_tier}</span></td>
+      <td>${r.source||'—'}</td>
+    </tr>`).join('');
+}
+
+// / keyboard shortcut to focus browse search
+document.addEventListener('keydown',function(e){
+  if(e.key==='/'&&document.activeElement.tagName!=='INPUT'&&document.activeElement.tagName!=='TEXTAREA'){
+    const browsePanel=document.getElementById('browse-panel');
+    if(browsePanel&&browsePanel.parentElement.style.display!=='none'){
+      e.preventDefault();
+      document.getElementById('browse-query').focus();
+    }
+  }
+});
+
+const SIM_COMPLEXES=new Set(['2HHB','1BRS','2PTC','1AON','1GRU','1AY7','1A2K','3GBN','1DVQ','1AXC']);
+
+async function selectDynamic(pdbId) {
+  const statsEl=document.getElementById('browse-stats');
+  const prevStats=statsEl?statsEl.textContent:'';
+  const setStatus=(msg,color)=>{if(!statsEl)return;statsEl.style.color=color||'';statsEl.textContent=msg;};
+  setStatus(`⏳ Loading ${pdbId} from RCSB… (may take 10–30 s first time)`,'var(--accent)');
+
+  let sim;
+  try {
+    const r=await fetch(`/complex/dynamic/${pdbId}`);
+    if (!r.ok) {
+      const err=await r.json().catch(()=>({}));
+      setStatus(`⚠ ${err.detail||'Failed to load '+pdbId}`,'var(--red)');
+      setTimeout(()=>setStatus(prevStats),6000); return;
+    }
+    sim=await r.json();
+  } catch(e) {
+    setStatus(`⚠ Network error: ${e.message}`,'var(--red)');
+    setTimeout(()=>setStatus(prevStats),6000); return;
+  }
+
+  setStatus(prevStats);
+  switchTab('sim');
+
+  state.currentPdb=pdbId; state.currentStep=0; state.playing=false; clearInterval(state.playTimer);
+  document.getElementById('btn-play').textContent='▶ Play';
+  document.getElementById('btn-play').classList.remove('active');
+  state.simulation=sim;
+  state.identityColorMap=buildIdentityColorMap(sim);
+  const stepAtSubunit=new Map();
+  sim.pred_order.forEach((subIdx,k)=>stepAtSubunit.set(subIdx,k+1));
+  state.stepAtSubunit=stepAtSubunit;
+  state.sparklineTaus=[];
+  stopPlaceholder();
+  renderExamples();
+
+  document.getElementById('graph-panel').style.display='flex';
+  document.getElementById('controls').style.display='flex';
+  document.getElementById('empty-state')?.remove();
+  document.getElementById('graph-title').textContent=`${pdbId} (on-demand)`;
+  document.getElementById('graph-pdb').textContent=pdbId;
+  document.getElementById('tau-val').textContent='—';
+  document.getElementById('top1-val').textContent='—';
+  document.getElementById('graph-panel').classList.remove('tau-perfect');
+  renderStepDots(); renderStep(0);
+}
+
+function browseSelect(pdbId) {
+  if (!pdbId||pdbId==='nan'||pdbId==='') return;
+  const upper=pdbId.toUpperCase();
+  if (SIM_COMPLEXES.has(upper)) { switchTab('sim'); selectComplex(upper); }
+  else selectDynamic(upper);
+}
+
+pollReady();
+
+// ── Mutations tab ─────────────────────────────────────────────────────────────
+
+const _mutState = { sequences: null, loading: false };
+
+async function _loadSequences() {
+  if (_mutState.sequences) return _mutState.sequences;
+  if (_mutState.loading) return null;
+  _mutState.loading = true;
+  try {
+    const r = await fetch('/static/sequences.json');
+    _mutState.sequences = await r.json();
+  } catch (_) { _mutState.sequences = {}; }
+  return _mutState.sequences;
+}
+
+async function initMutTab() {
+  const sel = document.getElementById('mut-complex-sel');
+  if (sel.options.length) return; // already populated
+  // Populate from COMPLEXES_LIST (available at top of script scope as state.complexes after loadComplexes())
+  // Fall back to SIM_COMPLEXES if state not ready
+  const complexes = state.complexes.length ? state.complexes :
+    [...SIM_COMPLEXES].map(id => ({ pdb_id: id, name: id }));
+  sel.innerHTML = '';
+  for (const c of complexes) {
+    const opt = document.createElement('option');
+    opt.value = c.pdb_id;
+    opt.textContent = `${c.pdb_id}${c.name && c.name !== c.pdb_id ? ' — ' + c.name : ''}`;
+    sel.appendChild(opt);
+  }
+  await onMutComplexChange();
+}
+
+async function onMutComplexChange() {
+  const pdbId = document.getElementById('mut-complex-sel').value;
+  if (!pdbId) return;
+  const chainSel = document.getElementById('mut-chain-sel');
+  chainSel.innerHTML = '';
+
+  const seqs = await _loadSequences();
+  const chains = seqs && seqs[pdbId] ? Object.keys(seqs[pdbId]) : [];
+
+  if (!chains.length) {
+    // Try to get chain list from simulation JSON
+    try {
+      const r = await fetch(`/static/simulations/${pdbId}.json`);
+      if (r.ok) {
+        const d = await r.json();
+        for (const sub of (d.subunits || [])) {
+          const opt = document.createElement('option');
+          opt.value = sub.chain;
+          opt.textContent = `${sub.chain} — ${sub.name}`;
+          opt.dataset.seq = '';
+          chainSel.appendChild(opt);
+        }
+      }
+    } catch (_) {}
+  } else {
+    const sim = await (async () => {
+      try { const r = await fetch(`/static/simulations/${pdbId}.json`); return r.ok ? await r.json() : null; } catch { return null; }
+    })();
+    const subMap = {};
+    if (sim) sim.subunits.forEach(s => { subMap[s.chain] = s.name; });
+    for (const chain of chains) {
+      const opt = document.createElement('option');
+      opt.value = chain;
+      opt.textContent = `${chain}${subMap[chain] ? ' — ' + subMap[chain] : ''}`;
+      opt.dataset.seq = seqs[pdbId][chain] || '';
+      chainSel.appendChild(opt);
+    }
+  }
+  onMutChainChange();
+}
+
+function _getSelectedSeq() {
+  const chainSel = document.getElementById('mut-chain-sel');
+  const opt = chainSel.options[chainSel.selectedIndex];
+  return opt ? (opt.dataset.seq || '') : '';
+}
+
+function onMutChainChange() {
+  const seq = _getSelectedSeq();
+  const posInput = document.getElementById('mut-pos');
+  posInput.max = seq.length || 9999;
+  posInput.value = Math.min(parseInt(posInput.value) || 1, seq.length || 1);
+  onMutPosChange();
+}
+
+function onMutPosChange() {
+  const seq = _getSelectedSeq();
+  const pos = parseInt(document.getElementById('mut-pos').value) || 1;
+  const wtEl = document.getElementById('mut-wt-aa');
+  const ctxEl = document.getElementById('mut-seq-context');
+  if (!seq) { wtEl.value = '?'; ctxEl.textContent = 'Sequence unavailable'; return; }
+  const idx = pos - 1;
+  const aa = (idx >= 0 && idx < seq.length) ? seq[idx] : '?';
+  wtEl.value = aa;
+  const lo = Math.max(0, idx - 10), hi = Math.min(seq.length, idx + 11);
+  const before = seq.slice(lo, idx);
+  const hl = seq[idx] || '';
+  const after = seq.slice(idx + 1, hi);
+  ctxEl.innerHTML = `${lo > 0 ? '…' : ''}${before}<span class="ctx-hl">${hl}</span>${after}${hi < seq.length ? '…' : ''}`;
+}
+
+async function runMutAnalysis() {
+  const pdbId  = document.getElementById('mut-complex-sel').value;
+  const chain  = document.getElementById('mut-chain-sel').value;
+  const pos    = parseInt(document.getElementById('mut-pos').value);
+  const wtAa   = document.getElementById('mut-wt-aa').value;
+  const mutAa  = document.getElementById('mut-aa-sel').value;
+
+  const errEl = document.getElementById('mut-error');
+  errEl.style.display = 'none';
+
+  if (!pdbId || !chain || !pos || !wtAa || wtAa === '?' || !mutAa) {
+    errEl.textContent = 'Fill all fields before running.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const btn = document.getElementById('btn-analyse-mut');
+  const spinner = document.getElementById('mut-spinner');
+  btn.disabled = true;
+  spinner.style.display = 'block';
+  document.getElementById('mut-results').style.display = 'none';
+
+  try {
+    const r = await fetch('/api/mutate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdb_id: pdbId, chain, position: pos, original_aa: wtAa, mutant_aa: mutAa, n_runs: 1 }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ detail: r.statusText }));
+      throw new Error(err.detail || err.error || r.statusText);
+    }
+    const data = await r.json();
+    _renderMutResults(data);
+    document.getElementById('mut-results').style.display = 'flex';
+    document.getElementById('mut-results').style.flexDirection = 'column';
+    document.getElementById('mut-results').style.gap = '14px';
+  } catch (e) {
+    errEl.textContent = `Error: ${e.message}`;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    spinner.style.display = 'none';
+  }
+}
+
+function _renderMutResults(d) {
+  const mutLabel = `${d.original_aa}${d.position}${d.mutant_aa} on chain ${d.chain}${d.subunit_name ? ' (' + d.subunit_name + ')' : ''}`;
+  const isSilent = d.original_aa === d.mutant_aa;
+  const mutType  = isSilent ? 'silent' : 'missense';
+  const deltaTau = (d.deltas || {}).tau || 0;
+  let severity = 'none';
+  if (Math.abs(deltaTau) >= 0.30) severity = 'strong';
+  else if (Math.abs(deltaTau) >= 0.15) severity = 'moderate';
+  else if (Math.abs(deltaTau) >= 0.05) severity = 'weak';
+
+  // Card 1
+  document.getElementById('mut-r-header').textContent = mutLabel;
+  const tc = {silent:'mut-badge-silent',missense:'mut-badge-missense'}[mutType]||'mut-badge-silent';
+  const sc = {none:'mut-sev-none',weak:'mut-sev-weak',moderate:'mut-sev-moderate',strong:'mut-sev-strong'}[severity]||'mut-sev-none';
+  document.getElementById('mut-r-badges').innerHTML =
+    `<span class="mut-badge ${tc}">${mutType}</span><span class="mut-badge ${sc}">${severity} disruption</span>`;
+  const wtTau  = (d.wt  || {}).tau || 0;
+  const mutTau = (d.mut || {}).tau || 0;
+  document.getElementById('mut-r-delta-emb').innerHTML  = _mutDeltaBar('WT τ', wtTau);
+  document.getElementById('mut-r-delta-func').innerHTML = _mutDeltaBar('Mut τ', mutTau);
+
+  // Card 2
+  _mutRenderKDE([wtTau], [mutTau]);
+  const sign = deltaTau > 0 ? '+' : '';
+  const col  = deltaTau < -0.05 ? 'var(--red)' : deltaTau > 0.05 ? 'var(--green)' : 'var(--text-muted)';
+  document.getElementById('mut-r-tau-subtitle').innerHTML =
+    `Δτ = <strong style="color:${col}">${sign}${deltaTau.toFixed(3)}</strong>` +
+    ` &nbsp;|&nbsp; WT τ = ${wtTau.toFixed(3)} → Mut τ = ${mutTau.toFixed(3)}` +
+    (d.redirected ? ' &nbsp;<span style="color:var(--orange)">⚡ pathway redirected</span>' : '');
+
+  // Card 3
+  const wtGtProbs  = (d.wt  || {}).gt_prob_per_step || [];
+  const mutGtProbs = (d.mut || {}).gt_prob_per_step || [];
+  _mutRenderScoreDots('mut-r-wt-scores',  wtGtProbs,  '#6366f1');
+  _mutRenderScoreDots('mut-r-mut-scores', mutGtProbs, '#ea7522');
+  const klSum = ((d.kl_per_step || []).reduce((a, v) => a + (v || 0), 0));
+  const ri = d.redirect_info || {};
+  document.getElementById('mut-r-score-subtitle').innerHTML =
+    `Total KL divergence: <strong>${klSum.toFixed(3)}</strong>` +
+    (ri.first_diff != null ? ` &nbsp;|&nbsp; First divergence at step ${ri.first_diff + 1}` : '');
+
+  // Card 4
+  const kl = d.kl_per_step || [];
+  const maxKl = Math.max(...kl, 0.01);
+  document.getElementById('mut-r-entropy').innerHTML = kl.map((v, i) => {
+    const w = Math.round((v / maxKl) * 100);
+    const barCol = v > 0.3 ? 'var(--red)' : v > 0.1 ? 'var(--orange)' : 'var(--accent)';
+    return `<div style="display:flex;align-items:center;gap:8px;margin-top:5px">
+      <span style="width:48px;font-size:11px;color:var(--text-muted)">Step ${i+1}</span>
+      <div style="flex:1;height:8px;background:var(--surface2);border-radius:4px;overflow:hidden">
+        <div style="width:${w}%;height:100%;background:${barCol};border-radius:4px"></div>
+      </div>
+      <span style="width:40px;font-size:11px;font-family:'JetBrains Mono',monospace;text-align:right">${v.toFixed(3)}</span>
+    </div>`;
+  }).join('') || '<span style="color:var(--text-muted);font-size:11px">No per-step data</span>';
+  document.getElementById('mut-r-entropy-arrow').innerHTML = d.redirected
+    ? `<span style="color:var(--orange)">⚡ Assembly pathway redirected${ri.num_swapped ? ' — ' + ri.num_swapped + ' subunit(s) reordered' : ''}</span>`
+    : `<span style="color:var(--green)">✓ Same assembly pathway</span>`;
+  document.getElementById('mut-r-order-change').textContent = ri.first_diff != null
+    ? `First divergence at step ${ri.first_diff + 1}; ${ri.num_swapped || 0} position(s) changed`
+    : 'Assembly order unchanged';
+
+  // Card 5
+  const tbody = document.getElementById('mut-r-go-tbody');
+  tbody.innerHTML = '';
+  const goGained = (d.go_delta || {}).gained || [];
+  const goLost   = (d.go_delta || {}).lost   || [];
+  for (const t of goGained) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td style="color:var(--text-muted)">—</td><td>${t}</td><td>0.00</td><td>1.00</td><td class="go-delta-pos">+gained</td>`;
+    tbody.appendChild(tr);
+  }
+  for (const t of goLost) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td style="color:var(--text-muted)">—</td><td>${t}</td><td>1.00</td><td>0.00</td><td class="go-delta-neg">−lost</td>`;
+    tbody.appendChild(tr);
+  }
+  if (!goGained.length && !goLost.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:8px">No GO term changes detected</td></tr>';
+  }
+}
+
+function _mutDeltaBar(label, value) {
+  const pct = Math.min(100, Math.max(0, (value || 0) * 100));
+  const col  = pct < 15 ? 'var(--red)' : pct < 60 ? 'var(--orange)' : 'var(--green)';
+  return `<div class="delta-bar-row">
+    <span class="delta-bar-label">${label}</span>
+    <div class="delta-bar-track"><div class="delta-bar-fill" style="width:${pct}%;background:${col}"></div></div>
+    <span class="delta-bar-value" style="color:${col}">${(value||0).toFixed(3)}</span>
+  </div>`;
+}
+
+function _mutRenderScoreDots(elId, scores, color) {
+  const el = document.getElementById(elId);
+  el.innerHTML = '';
+  if (!scores.length) { el.textContent = '—'; return; }
+  for (const s of scores) {
+    const d = document.createElement('div');
+    d.className = 'score-dot';
+    d.style.background = color;
+    d.style.opacity = Math.max(0.18, Math.min(1, s)).toFixed(2);
+    d.title = s.toFixed(3);
+    el.appendChild(d);
+  }
+}
+
+function _mutGaussianKDE(values, bw, nPts) {
+  if (!values.length) return [];
+  const mn = Math.min(...values), mx = Math.max(...values);
+  const lo = mn - bw * 2, hi = mx + bw * 2;
+  const step = (hi - lo) / nPts;
+  const pts = [];
+  for (let i = 0; i <= nPts; i++) {
+    const x = lo + i * step;
+    let y = 0;
+    for (const v of values) { const z = (x - v) / bw; y += Math.exp(-0.5 * z * z); }
+    pts.push({ x, y: y / (values.length * bw * Math.sqrt(2 * Math.PI)) });
+  }
+  return pts;
+}
+
+function _mutRenderKDE(wtVals, mutVals) {
+  const svg = document.getElementById('mut-kde-svg');
+  svg.innerHTML = '';
+  const W = 400, H = 80, bw = 0.06, nPts = 80;
+  const allVals = [...wtVals, ...mutVals];
+  if (!allVals.length) {
+    svg.innerHTML = '<text x="200" y="44" fill="#9ca3af" font-size="11" text-anchor="middle">No data</text>';
+    return;
+  }
+  const wtKde  = _mutGaussianKDE(wtVals,  bw, nPts);
+  const mutKde = _mutGaussianKDE(mutVals, bw, nPts);
+  const allPts = [...wtKde, ...mutKde];
+  const minX = Math.min(...allPts.map(p => p.x));
+  const maxX = Math.max(...allPts.map(p => p.x));
+  const maxY = Math.max(...allPts.map(p => p.y), 0.001);
+  const pad = 8;
+  const toSvg = (p) => ({
+    x: pad + ((p.x - minX) / (maxX - minX || 1)) * (W - 2*pad),
+    y: H - pad - (p.y / maxY) * (H - 2*pad),
+  });
+  const polyline = (pts, color, fill) => {
+    const coords = pts.map(p => { const s = toSvg(p); return `${s.x.toFixed(1)},${s.y.toFixed(1)}`; });
+    const first = toSvg(pts[0]), last = toSvg(pts[pts.length-1]);
+    if (fill) {
+      const areaCoords = `${first.x.toFixed(1)},${H-pad} ` + coords.join(' ') + ` ${last.x.toFixed(1)},${H-pad}`;
+      svg.innerHTML += `<polygon points="${areaCoords}" fill="${fill}" opacity="0.18"/>`;
+    }
+    svg.innerHTML += `<polyline points="${coords.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5"/>`;
+  };
+  if (wtKde.length)  polyline(wtKde,  '#6366f1', '#6366f1');
+  if (mutKde.length) polyline(mutKde, '#ea7522', '#ea7522');
+  // Legend
+  svg.innerHTML += `<rect x="${W-80}" y="6" width="10" height="3" rx="1" fill="#6366f1"/>
+    <text x="${W-66}" y="12" fill="#6b7280" font-size="9">WT</text>
+    <rect x="${W-80}" y="16" width="10" height="3" rx="1" fill="#ea7522"/>
+    <text x="${W-66}" y="22" fill="#6b7280" font-size="9">Mutant</text>`;
+}
+
+</script>
+
+</div><!-- /#app -->
+
+<script src="/static/home.js"></script>
+<script>
+  fetch('/api/metrics').then(r => r.ok ? r.json() : null).then(m => {
+    if (!m) return;
+    document.querySelectorAll('[data-metric]').forEach(el => {
+      const key = el.dataset.metric;
+      if (m[key] !== undefined) el.textContent = m[key];
+    });
+  }).catch(() => {});
+</script>
+</body>
+</html>

@@ -193,7 +193,50 @@ def build_bundles(args) -> list[Bundle]:
         if (i + 1) % 200 == 0:
             print(f"  precomputed {i+1}/{len(ds)}  ({time.time()-t0:.0f}s)")
     print(f"[data] {len(bundles)} bundles ready in {time.time()-t0:.0f}s")
+
+    # Channel health gate. A constant channel carries no information and cannot
+    # affect any prediction, so ablating it is guaranteed to show "no effect" —
+    # which reads as a modelling result when it is really a data outage. Two
+    # such outages were live in this corpus (go_cos identically zero; ppi
+    # divided by 1000 a second time on parse), so report it up front rather than
+    # leave it to be inferred from a flat ablation row.
+    report_channel_health(bundles)
     return bundles
+
+
+def report_channel_health(bundles: list) -> dict:
+    """Log per-edge-channel dynamic range pooled across the loaded corpus."""
+    if not bundles:
+        return {}
+    from src.features.channel_health import channel_stats
+
+    acc = {name: [] for name in EDGE_CHANNELS}
+    for b in bundles:
+        e = b.ef.detach().cpu().numpy()
+        n = e.shape[0]
+        if n < 2:
+            continue
+        off = ~np.eye(n, dtype=bool)
+        for name, ch in EDGE_CHANNELS.items():
+            if ch < e.shape[-1]:
+                acc[name].append(e[:, :, ch][off])
+
+    # channel_stats only ever looks at the off-diagonal; a non-square array is
+    # passed through whole, which is what we want for an already-flattened pool.
+    pooled = {name: (np.concatenate(v).reshape(-1, 1) if v else None)
+              for name, v in acc.items()}
+    stats = channel_stats(pooled, reference="sasa")
+
+    print("[channel-health] edge channel dynamic range across the corpus")
+    for s in stats.values():
+        flag = "" if s.status == "ok" else f"   <-- {s.status.upper()}"
+        print(f"    {s.name:<9} mean={s.mean:>8.4f}  std={s.std:>8.4f}  "
+              f"vs sasa={s.range_ratio:>6.3f}{flag}")
+    bad = [s.name for s in stats.values() if s.status != "ok"]
+    if bad:
+        print(f"[channel-health] {', '.join(bad)} cannot contribute — ablating "
+              f"these measures the data outage, not the model.")
+    return {k: v.to_dict() for k, v in stats.items()}
 
 
 # ──────────────────────────────────────────────────────────────────────────────

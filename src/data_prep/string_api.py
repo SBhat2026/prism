@@ -20,6 +20,29 @@ STRING_IDS_URL     = "https://string-db.org/api/json/get_string_ids"
 CALLER_ID          = "protein_assembly_sim"
 
 
+def normalise_string_score(raw) -> float:
+    """STRING scores → [0, 1].
+
+    `/api/json/network` returns `score` ALREADY normalised to [0, 1] (e.g.
+    0.999). Only the *request* parameter `required_score` uses the 0-1000
+    integer scale. An earlier version of this module divided the response by
+    1000 as well, which crushed every PPI value to ~1e-3 — three orders of
+    magnitude below the SASA channel — so the PPI edge channel became
+    numerically invisible to the network. See scripts/repair_ppi_cache.py for
+    the in-place repair of caches written before this fix.
+
+    Both scales are tolerated here so a future API change cannot silently
+    reintroduce the bug.
+    """
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    if v > 1.0:            # 0-1000 integer scale
+        v /= 1000.0
+    return float(min(max(v, 0.0), 1.0))
+
+
 def _map_uniprot_to_string(
     uniprot_ids: list[str],
     species: int,
@@ -147,7 +170,7 @@ def fetch_ppi_matrix(
         for item in r.json():
             a = item.get("preferredName_A", "")
             b = item.get("preferredName_B", "")
-            score = float(item.get("score", 0)) / 1000.0
+            score = normalise_string_score(item.get("score", 0))
 
             # Map back to UniProt; STRING preferred names may not equal UniProt
             # so also store by STRING ID
