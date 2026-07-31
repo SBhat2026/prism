@@ -119,8 +119,45 @@ class AssemblyScorer(nn.Module):
         candidates   : list[int]       — indices to score
 
     anchor_mode:
-        "max"    — score(c) = max_a score(c, a) [original]
-        "pooled" — score(c) = attention-pooled over assembled context [new default]
+        "max"      — score(c) = max_a score(c, a) [original]
+        "pooled"   — score(c) = attention-pooled over assembled context [default]
+        "frontier" — per-candidate cross-attention over the assembled set, biased
+                     by the candidate's own edges, plus multi-statistic edge
+                     pooling. See the note below.
+
+    Why "frontier" exists (Lever 7) — and what the diagnostics did *not* support
+    ---------------------------------------------------------------------------
+    In "pooled" mode the only state-dependent term reaching the score head is
+    `edge_to_complex = edge_feats[c, assembled].mean(1)` — a mean over every
+    assembled subunit. The obvious hypothesis was that this mean dilutes the one
+    interface that matters, and that recovering the max would close the gap to
+    the untrained BSA teacher above n=21.
+
+    `diagnose_quaternary.py` Q4 tested that directly and **refuted it**. Ranking
+    the true next subunit by max-over-core buried area is not better than by
+    mean-over-core; it is very slightly *worse* in every size bin (Δ = −0.004 to
+    −0.030). The reason is elementary in hindsight: at a given step the divisor
+    |assembled| is the same for every candidate, so mean and sum induce the
+    *identical* ranking (the measured sum and mean columns agree to the digit).
+    Dilution changes the feature's scale, not its argmax.
+
+    What the same measurement did show is worse for the model than the
+    hypothesis was: mean-pooled buried area alone scores top-1 = 0.294 at
+    n=21–40, matching the BSA teacher and beating every *trained* condition in
+    the scaling ablation (v4_baseline 0.210). The feature was never missing. The
+    trained model is being driven away from a statistic it can already represent
+    — which points at the objective (see `src/training/orbit_loss.py`), not the
+    pooling.
+
+    "frontier" is therefore kept as a strict capacity superset rather than a
+    claimed fix: it passes [mean ‖ max ‖ attention-weighted sum] instead of the
+    mean alone, pools the complex representation with attention *from the
+    candidate* rather than one global gate, and appends two scalars (contact
+    count, assembled fraction). It can express what "pooled" expresses, so it
+    cannot be worse in principle — but it carries a low prior and is ablated as
+    its own condition (`v4_frontier`) so it is judged, not assumed.
+
+    Default stays "pooled" — every existing v4/v5/v6 checkpoint loads unchanged.
     """
 
     def __init__(
@@ -133,11 +170,14 @@ class AssemblyScorer(nn.Module):
         dropout: float = 0.1,
         anchor_mode: str = "pooled",
         sparse_k: int = 0,           # 0 = no pruning; >0 = top-k neighbour pruning
+        contact_channel: int = 3,    # edge channel holding buried area (frontier mode)
     ):
         super().__init__()
         self.anchor_mode = anchor_mode
         self.sparse_k = sparse_k
         self.edge_dim = edge_dim
+        self.frontier = (anchor_mode == "frontier")
+        self.contact_channel = contact_channel
 
         self.node_proj = nn.Linear(node_dim, hidden)
 
@@ -158,9 +198,18 @@ class AssemblyScorer(nn.Module):
         # Context-gated anchor pooling attention gate (Step 11, anchor_mode="pooled")
         self.anchor_gate = nn.Linear(hidden, 1, bias=False)
 
-        # Score head: [candidate_repr | complex_repr | mean_edge_to_complex]
+        # Frontier cross-attention (Lever 7, anchor_mode="frontier")
+        if self.frontier:
+            self.q_proj = nn.Linear(hidden, hidden, bias=False)
+            self.k_proj = nn.Linear(hidden, hidden, bias=False)
+            self.edge_bias = nn.Linear(edge_dim, 1, bias=True)
+            head_in = hidden * 2 + edge_dim * 3 + 2
+        else:
+            head_in = hidden * 2 + edge_dim
+
+        # Score head: [candidate_repr | complex_repr | pooled edges (| frontier scalars)]
         self.score_head = nn.Sequential(
-            nn.Linear(hidden * 2 + edge_dim, hidden),
+            nn.Linear(head_in, hidden),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden, 1),
@@ -220,6 +269,9 @@ class AssemblyScorer(nn.Module):
         cand_t = torch.tensor(candidates, device=h.device, dtype=torch.long)
         cand_reprs = h[cand_t]  # (C, hidden)
 
+        if self.frontier:
+            return self._score_frontier(h, edge_feats, assembled_mask, cand_t, cand_reprs)
+
         if assembled_mask.any():
             assembled_h = h[assembled_mask]  # (A, hidden)
             if self.anchor_mode == "pooled":
@@ -237,6 +289,59 @@ class AssemblyScorer(nn.Module):
         complex_reprs = complex_repr.unsqueeze(0).expand(C, -1)
         combined = torch.cat([cand_reprs, complex_reprs, edge_to_complex], dim=-1)
         return self.score_head(combined).squeeze(-1)  # (C,)
+
+    def _score_frontier(
+        self,
+        h: torch.Tensor,                  # (N, hidden)
+        edge_feats: torch.Tensor,         # (N, N, edge_dim)
+        assembled_mask: torch.Tensor,     # (N,) bool
+        cand_t: torch.Tensor,             # (C,) long
+        cand_reprs: torch.Tensor,         # (C, hidden)
+    ) -> torch.Tensor:
+        """
+        Size-stable scoring: attend from each candidate to the assembled core and
+        pool its edges with mean/max/attention-weighted-sum instead of the mean
+        alone. See the class docstring for why the mean was the bug.
+        """
+        C, hidden = cand_reprs.shape
+        N = h.size(0)
+        n_assembled = int(assembled_mask.sum())
+
+        if n_assembled == 0:
+            zeros_e = torch.zeros(C, self.edge_dim * 3, device=h.device)
+            zeros_s = torch.zeros(C, 2, device=h.device)
+            combined = torch.cat(
+                [cand_reprs, torch.zeros(C, hidden, device=h.device), zeros_e, zeros_s], dim=-1
+            )
+            return self.score_head(combined).squeeze(-1)
+
+        assembled_h = h[assembled_mask]                          # (A, hidden)
+        e_ca = edge_feats[cand_t][:, assembled_mask]             # (C, A, edge_dim)
+
+        # Cross-attention: candidate query, assembled keys, edge-derived bias.
+        # The bias is what lets a single strong interface dominate a large core.
+        logits = (self.q_proj(cand_reprs) @ self.k_proj(assembled_h).T) / math.sqrt(hidden)
+        logits = logits + self.edge_bias(e_ca).squeeze(-1)        # (C, A)
+        logits = logits + self.anchor_gate(assembled_h).squeeze(-1).unsqueeze(0)
+        att = torch.softmax(logits, dim=1)                        # (C, A)
+
+        complex_reprs = att @ assembled_h                         # (C, hidden)
+
+        e_mean = e_ca.mean(1)                                     # (C, edge_dim)
+        e_max = e_ca.max(1).values                                # (C, edge_dim)
+        e_att = (att.unsqueeze(-1) * e_ca).sum(1)                 # (C, edge_dim)
+
+        # Two size-aware scalars: how many core subunits the candidate actually
+        # touches (log-compressed), and how far assembly has progressed.
+        ch = min(self.contact_channel, self.edge_dim - 1)
+        n_contacts = (e_ca[:, :, ch] > 0).sum(1).float()
+        scalars = torch.stack([
+            torch.log1p(n_contacts) / math.log(1.0 + max(N, 2)),
+            torch.full((C,), n_assembled / max(N, 1), device=h.device),
+        ], dim=-1)                                                # (C, 2)
+
+        combined = torch.cat([cand_reprs, complex_reprs, e_mean, e_max, e_att, scalars], dim=-1)
+        return self.score_head(combined).squeeze(-1)
 
     def forward(
         self,

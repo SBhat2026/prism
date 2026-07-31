@@ -466,7 +466,8 @@ def greedy_gnn(model: AssemblyScorer, cdata: ComplexData,
 
 # ── Build all precomputed tensors ────────────────────────────────────────────
 
-def precompute(cdata: ComplexData, esm_dim: int = 320, include_chiral: bool = False):
+def precompute(cdata: ComplexData, esm_dim: int = 320, include_chiral: bool = False,
+               include_quaternary: bool = False):
     """
     Returns (node_feats, edge_feats, adj, copy_indices) for one complex.
 
@@ -477,7 +478,16 @@ def precompute(cdata: ComplexData, esm_dim: int = 320, include_chiral: bool = Fa
     include_chiral=True appends the Lever-1 handedness descriptors:
       Node +3d [tetra_chirality, helical_sense, frame_handedness] → 658d
       Edge +1d [interface handedness det(û_ij, v_i, v_j)]          → 6d
-    Off by default so v4/v5/v6 checkpoints keep loading unchanged.
+
+    include_quaternary=True additionally appends the Lever-7 nonstandard-
+    quaternary descriptors (src/features/quaternary.py):
+      Node +4d [in_ring, fold_norm, ring_radius, axial_offset]     → 662d
+      Edge +5d [isologous, screw_angle, screw_rise, screw_handed,
+                ring_adjacent]                                     → 11d
+
+    Blocks are appended in a fixed order (chiral then quaternary) so the channel
+    slices in run_ablation.py stay stable. Both are off by default, so v4/v5/v6
+    checkpoints (655/5) keep loading unchanged.
     """
     N    = len(cdata.chain_ids)
     sasa = cdata.sasa_matrix / (cdata.sasa_matrix.max() + 1e-8)
@@ -517,6 +527,18 @@ def precompute(cdata: ComplexData, esm_dim: int = 320, include_chiral: bool = Fa
         )
         node_parts.append(chiral_node)             # (N, 3)
 
+    # NONSTANDARD-QUATERNARY FEATURES (Lever 7) — rings, helices, homomers.
+    quat_edge = None
+    if include_quaternary:
+        from src.features.quaternary import compute_quaternary_features
+        quat_node, quat_edge = compute_quaternary_features(
+            cdata.pdb_id, cdata.chain_ids, cdata.pdb_path,
+            contact_matrix=cdata.sasa_matrix,
+            uniprot_ids=cdata.uniprot_ids,
+            sequences=cdata.sequences,
+        )
+        node_parts.append(quat_node)               # (N, 4)
+
     node_feats = np.hstack(node_parts)
     node_feats_t = torch.tensor(node_feats, dtype=torch.float32)
 
@@ -540,6 +562,10 @@ def precompute(cdata: ComplexData, esm_dim: int = 320, include_chiral: bool = Fa
     if chiral_edge is not None:
         edge_feats_t = torch.cat(
             [edge_feats_t, torch.tensor(chiral_edge, dtype=torch.float32)], dim=-1
+        )
+    if quat_edge is not None:
+        edge_feats_t = torch.cat(
+            [edge_feats_t, torch.tensor(quat_edge, dtype=torch.float32)], dim=-1
         )
     adj_dense = torch.ones(N, N, dtype=torch.bool)
 

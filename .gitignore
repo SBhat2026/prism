@@ -15,6 +15,9 @@ data/embeddings/
 data/labeled_15k/
 data/interim/labeled_dataset.tsv
 data/raw/
+data/chiral_cache/
+data/quaternary_cache/
+data/symmetry_cache/
 
 # Model weights (tracked separately via HF Hub or LFS)
 *.pt

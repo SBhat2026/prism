@@ -57,14 +57,17 @@ from src.evaluation.symmetry import (
 )
 from src.evaluation.splits import make_size_splits, save_splits
 from src.data_prep.bsa_teacher import bsa_greedy_order
+from src.training.orbit_loss import orbit_target_positions, orbit_marginal_ce
 from train_gnn import load_labeled_15k_dataset, precompute, DEVICE
 
 OUT_DIR = ROOT / "results" / "ablation_scaling"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 ESM_DIM = 640
-NODE_DIM = ESM_DIM + 5 + 1 + 9 + 3      # esm | plddt | sasa_diag | geom | chiral = 658
-EDGE_DIM = 6                             # ppi | esm_cos | go_cos | sasa | contact | chiral
+# esm | plddt | sasa_diag | geom | chiral | quat = 662
+NODE_DIM = ESM_DIM + 5 + 1 + 9 + 3 + 4
+# ppi | esm_cos | go_cos | sasa | contact | chiral | 5× quaternary = 11
+EDGE_DIM = 11
 
 NODE_SLICES = {
     "esm":    (0, ESM_DIM),
@@ -72,8 +75,14 @@ NODE_SLICES = {
     "sasa":   (ESM_DIM + 5, ESM_DIM + 6),
     "geom":   (ESM_DIM + 6, ESM_DIM + 15),
     "chiral": (ESM_DIM + 15, ESM_DIM + 18),
+    "quat":   (ESM_DIM + 18, ESM_DIM + 22),
 }
-EDGE_CHANNELS = {"ppi": 0, "esm_cos": 1, "go_cos": 2, "sasa": 3, "contact": 4, "chiral": 5}
+EDGE_CHANNELS = {
+    "ppi": 0, "esm_cos": 1, "go_cos": 2, "sasa": 3, "contact": 4, "chiral": 5,
+    # Lever 7 — nonstandard quaternary structure (rings, helices, homomers)
+    "isologous": 6, "screw_angle": 7, "screw_rise": 8, "screw_handed": 9, "ring_adj": 10,
+}
+QUAT_EDGE = ["isologous", "screw_angle", "screw_rise", "screw_handed", "ring_adj"]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -124,6 +133,48 @@ CONDITIONS: dict[str, dict] = {
         "edge": list(EDGE_CHANNELS),
         "note": "all channels including chirality",
     },
+
+    # ── Lever 7: nonstandard quaternary structure ────────────────────────────
+    # Each of the three ingredients is isolated before they are combined, so a
+    # gain in `symmetry_full` can be attributed rather than just observed.
+
+    # (a) Features only — screw handedness, isologous typing, ring adjacency.
+    "v4_plus_quaternary": {
+        "node": ["esm", "plddt", "sasa", "geom", "quat"],
+        "edge": ["ppi", "esm_cos", "go_cos", "sasa", "contact"] + QUAT_EDGE,
+        "note": "Lever 7 features — screw handedness + isologous typing + ring adjacency",
+    },
+    # (b) Loss only — same v4 features, orbit-marginal objective.
+    "v4_orbit_loss": {
+        "node": ["esm", "plddt", "sasa", "geom"],
+        "edge": ["ppi", "esm_cos", "go_cos", "sasa", "contact"],
+        "loss": "orbit",
+        "note": "Lever 7 loss — symmetry-quotiented (orbit-marginal) cross-entropy",
+    },
+    # (c) Architecture only — frontier pooling instead of mean-over-core.
+    "v4_frontier": {
+        "node": ["esm", "plddt", "sasa", "geom"],
+        "edge": ["ppi", "esm_cos", "go_cos", "sasa", "contact"],
+        "anchor_mode": "frontier",
+        "note": "Lever 7 architecture — max/attention edge pooling replaces the mean",
+    },
+    # (d) All three. The condition the roadmap predicts should move large-n.
+    "symmetry_full": {
+        "node": ["esm", "plddt", "sasa", "geom", "chiral", "quat"],
+        "edge": list(EDGE_CHANNELS),
+        "loss": "orbit",
+        "anchor_mode": "frontier",
+        "note": "Lever 7 combined — quaternary features + orbit loss + frontier pooling",
+    },
+    # (e) Structure-only version of (d): the ablation showed ESM buys nothing
+    # above n=21, so this asks whether it can now be dropped outright.
+    "symmetry_no_esm": {
+        "node": ["plddt", "sasa", "geom", "chiral", "quat"],
+        "edge": ["ppi", "sasa", "contact", "chiral"] + QUAT_EDGE,
+        "loss": "orbit",
+        "anchor_mode": "frontier",
+        "note": "Lever 7 combined, sequence channels removed",
+    },
 }
 
 
@@ -144,12 +195,18 @@ def build_masks(cond: dict) -> tuple[torch.Tensor, torch.Tensor]:
 
 class Bundle:
     """Everything needed to train/score one complex, precomputed once and shared."""
-    __slots__ = ("cd", "nf", "ef", "adj", "ci", "sym", "n", "gt", "esm_perm", "bsa_seed")
+    __slots__ = ("cd", "nf", "ef", "adj", "ci", "sym", "n", "gt", "esm_perm", "bsa_seed",
+                 "oid", "contact")
 
     def __init__(self, cd, nf, ef, adj, ci, sym):
         self.cd, self.nf, self.ef, self.adj, self.ci, self.sym = cd, nf, ef, adj, ci, sym
         self.n = len(cd.chain_ids)
         self.gt = list(cd.gt_order)
+        # Orbit map + contact matrix: the two inputs the symmetry-quotiented
+        # objective needs (src/training/orbit_loss.py).
+        self.oid = orbit_id_map(sym.orbits)
+        self.contact = np.array(cd.sasa_matrix, dtype=np.float64, copy=True)
+        np.fill_diagonal(self.contact, 0.0)
         rng = np.random.default_rng(abs(hash(cd.pdb_id)) % (2**31))
         self.esm_perm = torch.tensor(rng.permutation(self.n), dtype=torch.long, device=DEVICE)
         w = np.array(cd.sasa_matrix, dtype=np.float64, copy=True)
@@ -181,7 +238,8 @@ def build_bundles(args) -> list[Bundle]:
     bundles, t0 = [], time.time()
     for i, cd in enumerate(ds):
         try:
-            nf, ef, adj, ci = precompute(cd, ESM_DIM, include_chiral=True)
+            nf, ef, adj, ci = precompute(cd, ESM_DIM, include_chiral=True,
+                                        include_quaternary=True)
         except Exception as e:
             print(f"  [skip] {cd.pdb_id}: {e}")
             continue
@@ -243,7 +301,17 @@ def report_channel_health(bundles: list) -> dict:
 # Loss / eval
 # ──────────────────────────────────────────────────────────────────────────────
 
-def step_loss(model, b: Bundle, nf, ef, label_smooth: float = 0.1) -> torch.Tensor:
+def step_loss(model, b: Bundle, nf, ef, label_smooth: float = 0.1,
+              loss_mode: str = "exact") -> torch.Tensor:
+    """
+    Teacher-forced ranking loss.
+
+    loss_mode="exact"  — one true chain index per step (the historical objective)
+    loss_mode="orbit"  — marginal likelihood over the orbit of the true chain,
+                         narrowed to the members touching the assembled core.
+                         Identical to "exact" whenever the orbit is a singleton,
+                         so asymmetric complexes are unaffected.
+    """
     h = model.embed(nf, b.adj, ef, b.ci)
     order, n = b.gt, b.n
     losses = []
@@ -256,10 +324,16 @@ def step_loss(model, b: Bundle, nf, ef, label_smooth: float = 0.1) -> torch.Tens
         mask = torch.zeros(n, dtype=torch.bool, device=DEVICE)
         mask[assembled] = True
         scores = model.score_candidates(h, ef, mask, remaining)
-        k = scores.size(0)
-        soft = torch.full((k,), label_smooth / k, device=DEVICE)
-        soft[remaining.index(correct)] += 1.0 - label_smooth
-        losses.append(-(soft * F.log_softmax(scores, 0)).sum())
+
+        if loss_mode == "orbit":
+            tgt, _ = orbit_target_positions(remaining, correct, b.oid,
+                                            assembled, b.contact)
+            losses.append(orbit_marginal_ce(scores, tgt, label_smooth))
+        else:
+            k = scores.size(0)
+            soft = torch.full((k,), label_smooth / k, device=DEVICE)
+            soft[remaining.index(correct)] += 1.0 - label_smooth
+            losses.append(-(soft * F.log_softmax(scores, 0)).sum())
     if not losses:
         return torch.zeros((), device=DEVICE)
     return torch.stack(losses).mean()
@@ -408,10 +482,13 @@ def train_condition(name, cond, train_b, val_b, args) -> tuple[AssemblyScorer, l
 
     nm, em = build_masks(cond)
     shuffle_esm = bool(cond.get("shuffle_esm"))
+    loss_mode = cond.get("loss", "exact")
+    anchor_mode = cond.get("anchor_mode", "pooled")
 
     model = AssemblyScorer(
         node_dim=NODE_DIM, edge_dim=EDGE_DIM, hidden=args.hidden,
-        n_layers=args.layers, heads=4, dropout=0.1, anchor_mode="pooled",
+        n_layers=args.layers, heads=4, dropout=0.1, anchor_mode=anchor_mode,
+        contact_channel=EDGE_CHANNELS["sasa"],
     ).to(DEVICE)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-6)
@@ -430,7 +507,7 @@ def train_condition(name, cond, train_b, val_b, args) -> tuple[AssemblyScorer, l
             losses = []
             for b in batch:
                 nf, ef = b.view(nm, em, shuffle_esm)
-                losses.append(step_loss(model, b, nf, ef))
+                losses.append(step_loss(model, b, nf, ef, loss_mode=loss_mode))
             loss = torch.stack(losses).mean()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)

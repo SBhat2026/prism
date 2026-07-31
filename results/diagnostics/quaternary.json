@@ -1,0 +1,168 @@
+{
+  "q1_mirror": {
+    "n_complexes": 120,
+    "n_pairs": 1826,
+    "n_with_nonzero_rise": 97,
+    "mean_abs_rise": 13.79139001780148,
+    "rise_sign_flip_residual": 0.0,
+    "theta_invariance_residual": 0.0,
+    "iso_invariance_residual": 0.0,
+    "rise_sign_flip_fraction": 1.0
+  },
+  "q2_interface_types": {
+    "n_complexes": 393,
+    "point_groups": {
+      "C1": 792,
+      "D3": 23,
+      "C4": 15,
+      "C3": 14,
+      "C6": 10,
+      "D4": 8,
+      "C9": 6,
+      "C8": 5,
+      "C10": 5,
+      "D15": 3
+    },
+    "by_bin": {
+      "2-4": {
+        "n_homomeric_contacts": 17,
+        "mean_isologous_overlap": 0.1694659991656237,
+        "isologous": 0.23529411764705882,
+        "heterologous": 0.058823529411764705,
+        "helical": 0.6470588235294118,
+        "translational": 0.0,
+        "mixed": 0.058823529411764705
+      },
+      "5-10": {
+        "n_homomeric_contacts": 587,
+        "mean_isologous_overlap": 0.30277250029953706,
+        "isologous": 0.3339011925042589,
+        "heterologous": 0.29131175468483816,
+        "helical": 0.3270868824531516,
+        "translational": 0.02555366269165247,
+        "mixed": 0.022146507666098807
+      },
+      "11-20": {
+        "n_homomeric_contacts": 1319,
+        "mean_isologous_overlap": 0.1946177504886746,
+        "isologous": 0.12964366944655042,
+        "heterologous": 0.4518574677786202,
+        "helical": 0.3017437452615618,
+        "translational": 0.003032600454890068,
+        "mixed": 0.11372251705837756
+      },
+      "21-40": {
+        "n_homomeric_contacts": 2147,
+        "mean_isologous_overlap": 0.06427549282214919,
+        "isologous": 0.05170004657661854,
+        "heterologous": 0.5090824406148113,
+        "helical": 0.3903120633442012,
+        "translational": 0.006520726595249185,
+        "mixed": 0.0423847228691197
+      },
+      "41+": {
+        "n_homomeric_contacts": 1085,
+        "mean_isologous_overlap": 0.07194239883365822,
+        "isologous": 0.07557603686635944,
+        "heterologous": 0.2359447004608295,
+        "helical": 0.6728110599078341,
+        "translational": 0.004608294930875576,
+        "mixed": 0.011059907834101382
+      }
+    }
+  },
+  "q3_degeneracy": {
+    "2-4": {
+      "complexes": 135,
+      "ambiguous_step_frac": 0.02962962962962963,
+      "mean_orbit_k": 1.0333333333333334,
+      "max_orbit_k": 3,
+      "ce_floor_nats": 0.022039416861436026,
+      "ce_floor_after_frontier": 0.017970482458961545,
+      "frontier_resolved_frac": 0.011111111111111112
+    },
+    "5-10": {
+      "complexes": 533,
+      "ambiguous_step_frac": 0.23338247118734926,
+      "mean_orbit_k": 1.2678727776288752,
+      "max_orbit_k": 5,
+      "ce_floor_nats": 0.17466955359037004,
+      "ce_floor_after_frontier": 0.144886395385338,
+      "frontier_resolved_frac": 0.0634771732332708
+    },
+    "11-20": {
+      "complexes": 155,
+      "ambiguous_step_frac": 0.5745175254852675,
+      "mean_orbit_k": 2.26956965973095,
+      "max_orbit_k": 11,
+      "ce_floor_nats": 0.6045308128169369,
+      "ce_floor_after_frontier": 0.5309255610500051,
+      "frontier_resolved_frac": 0.17359959037378392
+    },
+    "21-40": {
+      "complexes": 58,
+      "ambiguous_step_frac": 0.7355979748221129,
+      "mean_orbit_k": 4.739633402995472,
+      "max_orbit_k": 16,
+      "ce_floor_nats": 1.1457884138520094,
+      "ce_floor_after_frontier": 1.017356774404611,
+      "frontier_resolved_frac": 0.31838271881375324
+    },
+    "41+": {
+      "complexes": 10,
+      "ambiguous_step_frac": 0.735,
+      "mean_orbit_k": 8.137857142857143,
+      "max_orbit_k": 23,
+      "ce_floor_nats": 1.4873213995081964,
+      "ce_floor_after_frontier": 1.4047444617148168,
+      "frontier_resolved_frac": 0.24761904761904763
+    }
+  },
+  "q4_pooling": {
+    "2-4": {
+      "complexes": 135,
+      "mean": 0.5481481481481482,
+      "max": 0.5444444444444444,
+      "sum": 0.5481481481481482,
+      "mean_sym": 0.5592592592592592,
+      "max_sym": 0.5555555555555556,
+      "max_minus_mean": -0.0037037037037037646
+    },
+    "5-10": {
+      "complexes": 533,
+      "mean": 0.49914455463235957,
+      "max": 0.4821182882158492,
+      "sum": 0.49914455463235957,
+      "mean_sym": 0.525254623425355,
+      "max_sym": 0.51148038952917,
+      "max_minus_mean": -0.017026266416510394
+    },
+    "11-20": {
+      "complexes": 155,
+      "mean": 0.33656379462831076,
+      "max": 0.32630009775171065,
+      "sum": 0.33656379462831076,
+      "mean_sym": 0.4246369222175674,
+      "max_sym": 0.4112342317181027,
+      "max_minus_mean": -0.010263696876600115
+    },
+    "21-40": {
+      "complexes": 58,
+      "mean": 0.2935263969746728,
+      "max": 0.26357851918196745,
+      "sum": 0.2935263969746728,
+      "mean_sym": 0.37558715231129025,
+      "max_sym": 0.34152050057222466,
+      "max_minus_mean": -0.029947877792705357
+    },
+    "41+": {
+      "complexes": 10,
+      "mean": 0.10666666666666666,
+      "max": 0.10500000000000001,
+      "sum": 0.10666666666666666,
+      "mean_sym": 0.14952380952380953,
+      "max_sym": 0.14785714285714285,
+      "max_minus_mean": -0.0016666666666666496
+    }
+  }
+}
